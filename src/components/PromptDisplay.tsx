@@ -78,7 +78,7 @@ const PromptDisplay: React.FC<PromptDisplayProps> = ({ promptData }) => {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto p-6">
+    <div className="space-y-6 max-w-4xl mx-auto p-6 h-screen overflow-y-auto">
       <h1 className="text-2xl font-bold text-foreground mb-6">{promptData.name}</h1>
       
       {promptData.name === 'Apply Changes' ? (

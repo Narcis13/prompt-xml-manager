@@ -56,6 +56,36 @@ const DiffModal: React.FC<DiffModalProps> = ({ diffs, isOpen, onClose }) => {
         diffViewerTitleColor: "#fff",
         diffViewerTitleBorderColor: "#353535"
       }
+    },
+    // Add custom styles for the diff viewer
+    line: {
+      padding: "4px 2px",
+      '&:hover': {
+        background: "#2a2a2a"
+      }
+    },
+    content: {
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      fontSize: "13px",
+      lineHeight: "1.5",
+      padding: "0 10px"
+    },
+    gutter: {
+      padding: "0 10px",
+      minWidth: "60px",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      fontSize: "13px",
+      lineHeight: "1.5",
+      textAlign: "right" as const,
+      background: "#1a1a1a",
+      '&:hover': {
+        background: "#262626"
+      }
+    },
+    codeFold: {
+      padding: "0 10px",
+      height: "100%",
+      background: "#262626"
     }
   };
 
@@ -159,6 +189,12 @@ const DiffModal: React.FC<DiffModalProps> = ({ diffs, isOpen, onClose }) => {
                   hideLineNumbers={false}
                   showDiffOnly={false}
                   extraLinesSurroundingDiff={3}
+                  renderContent={(str: string) => {
+                    if (!str) return null;
+                    return str.split('\n').map((line, i) => (
+                      <span key={i} className="whitespace-pre">{line || ' '}</span>
+                    ));
+                  }}
                 />
               </div>
             </>

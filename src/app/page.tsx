@@ -39,7 +39,7 @@ export default function HomePage() {
 
   return (
     <Layout>
-      <div className="flex w-full h-full min-h-screen bg-background">
+      <div className="flex w-full h-screen bg-background overflow-hidden">
         {/* Sidebar with navigation */}
         <Sidebar
           prompts={PROMPTS}
@@ -48,7 +48,7 @@ export default function HomePage() {
         />
         
         {/* Main content area */}
-        <main className="flex-1 overflow-y-auto bg-gradient-to-b from-background to-background/50">
+        <main className="flex-1 bg-gradient-to-b from-background to-background/50">
           <div className="h-full">
             <PromptDisplay promptData={selectedPrompt} />
           </div>

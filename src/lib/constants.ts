@@ -57,19 +57,19 @@ Your specifications will be used as direct input for planning & code generation 
 First, carefully review the project request:
 
 <project_request>
-{{insert_request_here}}
+{{PROJECT_REQUEST}}
 </project_request>
 
 Next, carefully review the project rules:
 
 <project_rules>
-{{insert_rules_here}}
+{{PROJECT_RULES}}
 </project_rules>
 
 Finally, carefully review the starter template:
 
 <starter_template>
-{{insert_template_here}}
+{{STARTER_TEMPLATE}}
 </starter_template>
 
 Your task is to generate a comprehensive technical specification based on this information.
@@ -393,7 +393,7 @@ Please review the following context and implementation:
 </implementation_plan>
 
 <existing_code>
-{{EXISTING_CODE}}
+{{NEW_CODE}}
 </existing_code>
 
 First, analyze the implemented code against the original requirements and plan. Consider the following areas:
