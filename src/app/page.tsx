@@ -1,6 +1,7 @@
 /**
  * @file HomePage
- * @description Main landing page showing the sidebar (steps) and the selected prompt content.
+ * @description Main landing page showing the sidebar (steps) and the selected prompt content
+ * with a sleek dark theme and professional layout.
  */
 
 'use client';
@@ -29,19 +30,28 @@ export default function HomePage() {
   const selectedPrompt: PromptData = PROMPTS[selectedPromptIndex];
 
   if (isLoading) {
-    return <Layout><div className="flex w-full h-full min-h-screen"></div></Layout>;
+    return (
+      <Layout>
+        <div className="flex w-full h-full min-h-screen bg-background animate-pulse" />
+      </Layout>
+    );
   }
 
   return (
     <Layout>
-      <div className="flex w-full h-full min-h-screen">
+      <div className="flex w-full h-full min-h-screen bg-background">
+        {/* Sidebar with navigation */}
         <Sidebar
           prompts={PROMPTS}
           selectedIndex={selectedPromptIndex}
           onSelect={handleSelectPrompt}
         />
-        <main className="flex-1 p-4 overflow-y-auto">
-          <PromptDisplay promptData={selectedPrompt} />
+        
+        {/* Main content area */}
+        <main className="flex-1 overflow-y-auto bg-gradient-to-b from-background to-background/50">
+          <div className="h-full">
+            <PromptDisplay promptData={selectedPrompt} />
+          </div>
         </main>
       </div>
     </Layout>

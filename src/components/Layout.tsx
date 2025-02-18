@@ -11,15 +11,15 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-950 to-black text-white">
-      <header className="border-b border-gray-800 bg-black/50 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-blue-600">
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+        <div className="px-6 py-4">
+          <h1 className="text-xl font-bold text-foreground">
             Prompt XML Manager
           </h1>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className="h-[calc(100vh-4rem)]">
         {children}
       </main>
     </div>

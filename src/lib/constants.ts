@@ -453,4 +453,5 @@ export const PROMPTS: PromptData[] = [
   { name: 'Planner Prompt', template: PLANNER_PROMPT },
   { name: 'CodeGen Prompt (XML)', template: CODEGEN_PROMPT_XML },
   { name: 'Review Prompt', template: REVIEW_PROMPT },
+  { name: 'Apply Changes', template: '' }
 ];

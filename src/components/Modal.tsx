@@ -46,16 +46,16 @@ const Modal: React.FC<ModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+    <div className="fixed inset-0 bg-background/80 flex items-center justify-center z-50 backdrop-blur-sm">
       <div
         ref={modalRef}
-        className="bg-gray-900 rounded-lg p-6 w-full max-w-2xl transform transition-all duration-200 ease-in-out"
+        className="bg-card border border-border/50 rounded-lg p-6 w-full max-w-2xl transform transition-all duration-200 ease-in-out shadow-xl"
       >
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-semibold text-gray-100">{title}</h3>
+          <h3 className="text-xl font-semibold text-foreground">{title}</h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-200 transition-colors"
+            className="text-muted-foreground hover:text-foreground transition-colors"
           >
             <svg
               className="w-6 h-6"
@@ -76,13 +76,13 @@ const Modal: React.FC<ModalProps> = ({
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full h-64 p-4 bg-gray-800 text-gray-100 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          className="w-full h-64 p-4 bg-secondary text-foreground rounded-lg resize-none border border-border/50 focus:ring-2 focus:ring-primary focus:outline-none transition-all"
           placeholder="Enter your text here..."
         />
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex justify-end space-x-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary-600 transition-colors shadow-lg shadow-primary/20"
           >
             Done
           </button>
