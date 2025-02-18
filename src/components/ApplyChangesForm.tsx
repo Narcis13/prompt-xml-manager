@@ -1,13 +1,23 @@
 "use client";
 /**
  * @file ApplyChangesForm.tsx
- * @description Form to paste XML from the O1 model and apply changes to a codebase. 
- * Allows an optional base directory and/or a full path or project folder name, stored in localStorage.
+ * @description Form to paste XML from the O1 model and apply changes to a codebase.
+ * Now includes a "Preview Changes" feature that shows a green/red diff of what
+ * would be changed before actually applying them.
  */
 
 import React, { useState, useEffect } from "react";
-import { applyChangesAction } from "../actions/apply-changes-actions";
+import { applyChangesAction, previewChangesAction } from "../actions/apply-changes-actions";
 import { useLocalStorage } from "../lib/hooks/useLocalStorage";
+import DiffModal from "./DiffModal";
+
+interface PreviewDiffResult {
+  file_path: string;
+  file_summary: string;
+  file_operation: string;
+  diff?: string;
+  error?: string;
+}
 
 const ApplyChangesForm: React.FC = () => {
   const [xml, setXml] = useState<string>("");
@@ -19,6 +29,10 @@ const ApplyChangesForm: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
 
+  const [previewError, setPreviewError] = useState<string>("");
+  const [previewDiffs, setPreviewDiffs] = useState<PreviewDiffResult[] | null>(null);
+  const [showDiffModal, setShowDiffModal] = useState<boolean>(false);
+
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => {
@@ -28,44 +42,76 @@ const ApplyChangesForm: React.FC = () => {
     }
   }, [successMessage]);
 
-  const handleApply = async () => {
-    setErrorMessage("");
-    if (!xml.trim()) {
-      setErrorMessage("Please paste XML before applying changes.");
-      return;
-    }
-
+  const buildFinalDirectory = (): string => {
     let finalDirectory = "";
     const trimmedProjectFolder = projectFolder.trim();
     const trimmedBaseDir = baseDir.trim();
 
-    // If projectFolder is a full path starting with '/', we use it directly
+    // If projectFolder is a full path starting with '/', use it directly
     if (trimmedProjectFolder.startsWith("/")) {
       finalDirectory = trimmedProjectFolder;
     } else {
-      // Combine baseDir + projectFolder if baseDir is present; else fallback
       if (trimmedBaseDir && trimmedProjectFolder) {
-        // e.g. /Users/saint/Dev + ghost-aio
         if (trimmedBaseDir.endsWith("/")) {
           finalDirectory = trimmedBaseDir + trimmedProjectFolder;
         } else {
           finalDirectory = trimmedBaseDir + "/" + trimmedProjectFolder;
         }
       } else if (trimmedBaseDir && !trimmedProjectFolder) {
-        // just use base dir
         finalDirectory = trimmedBaseDir;
       } else if (!trimmedBaseDir && trimmedProjectFolder) {
-        // just use project folder
         finalDirectory = trimmedProjectFolder;
-      } else {
-        setErrorMessage("No directory specified. Provide either a base directory + project folder, or a full path in 'project folder' field.");
-        return;
       }
+    }
+
+    return finalDirectory;
+  };
+
+  const handlePreview = async () => {
+    setPreviewError("");
+    setPreviewDiffs(null);
+    setShowDiffModal(false);
+
+    if (!xml.trim()) {
+      setPreviewError("Please paste XML before previewing changes.");
+      return;
+    }
+
+    const finalDirectory = buildFinalDirectory();
+    if (!finalDirectory) {
+      setPreviewError("No directory specified. Provide a base directory + project folder or a full path.");
+      return;
+    }
+
+    try {
+      const result = await previewChangesAction(xml, finalDirectory);
+      setPreviewDiffs(result);
+      setShowDiffModal(true);
+    } catch (error: any) {
+      setPreviewError(error?.message || "An error occurred while previewing changes.");
+    }
+  };
+
+  const handleApply = async () => {
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (!xml.trim()) {
+      setErrorMessage("Please paste XML before applying changes.");
+      return;
+    }
+
+    const finalDirectory = buildFinalDirectory();
+    if (!finalDirectory) {
+      setErrorMessage("No directory specified. Provide a base directory + project folder or a full path.");
+      return;
     }
 
     try {
       await applyChangesAction(xml, finalDirectory);
       setXml("");
+      setPreviewDiffs(null);
+      setShowDiffModal(false);
       setSuccessMessage("Changes applied successfully!");
     } catch (error: any) {
       setErrorMessage(error?.message || "An error occurred while applying changes.");
@@ -92,7 +138,7 @@ const ApplyChangesForm: React.FC = () => {
           type="text"
           value={baseDir}
           onChange={(e) => setBaseDir(e.target.value)}
-          placeholder="e.g. /Users/saint/Dev"
+          placeholder="e.g. /Users/{user}/{dev-folder}"
         />
         <p className="text-sm text-muted-foreground mt-2">
           This is optional. If provided, it will combine with your project folder name below.
@@ -106,7 +152,7 @@ const ApplyChangesForm: React.FC = () => {
           type="text"
           value={projectFolder}
           onChange={(e) => setProjectFolder(e.target.value)}
-          placeholder="e.g. /Users/saint/Dev/ghost-aio or ghost-aio"
+          placeholder="e.g. /Users/user/{dev-folder}/{project-name} or {project-name}"
         />
         <p className="text-sm text-muted-foreground mt-2">
           If you provide a full path (starting with /), the base directory above will be ignored.
@@ -123,12 +169,36 @@ const ApplyChangesForm: React.FC = () => {
         />
       </div>
 
-      <button
-        className="px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary-600 transition-colors shadow-lg shadow-primary/20 font-medium"
-        onClick={handleApply}
-      >
-        Apply Changes
-      </button>
+      <div className="flex items-center space-x-4">
+        <button
+          className="flex-1 px-6 py-3 bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg transition-colors font-medium"
+          onClick={handlePreview}
+        >
+          Preview Changes
+        </button>
+
+        <button
+          className="flex-1 px-6 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors shadow-lg shadow-primary/20 font-medium"
+          onClick={handleApply}
+        >
+          Apply Changes
+        </button>
+      </div>
+
+      {previewError && (
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
+          {previewError}
+        </div>
+      )}
+
+      {/* Diff Modal */}
+      {previewDiffs && (
+        <DiffModal
+          diffs={previewDiffs}
+          isOpen={showDiffModal}
+          onClose={() => setShowDiffModal(false)}
+        />
+      )}
     </div>
   );
 };

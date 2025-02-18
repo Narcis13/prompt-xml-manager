@@ -32,4 +32,6 @@ npm install
 npm run dev
 ```
 
+3. Fill out the environment variables in the `.env.local` file for ease of applying changes to the codebase.
+
 The application will be available at [http://localhost:8888](http://localhost:8888).

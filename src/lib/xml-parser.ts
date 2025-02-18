@@ -35,7 +35,7 @@ export async function parseXmlString(xmlString: string): Promise<ParsedFileChang
       const file_operation = fileOperationNode.textContent?.trim() ?? "";
       const file_path = filePathNode.textContent?.trim() ?? "";
 
-      let file_code: string | undefined = undefined;
+      let file_code: string | undefined;
       if (fileCodeNode && fileCodeNode.firstChild) {
         file_code = fileCodeNode.textContent?.trim() ?? "";
       }
@@ -53,4 +53,33 @@ export async function parseXmlString(xmlString: string): Promise<ParsedFileChang
     console.error("Error parsing XML:", error);
     return null;
   }
+}
+
+/**
+ * parseAndValidateXml
+ * Extends parseXmlString by:
+ *  1) Checking if XML is well-formed
+ *  2) Ensuring each file has recognized file_operation
+ *  3) Ensuring file_code is present for CREATE/UPDATE
+ */
+export async function parseAndValidateXml(xmlString: string): Promise<ParsedFileChange[]> {
+  const parsed = await parseXmlString(xmlString);
+
+  if (!parsed) {
+    throw new Error("Invalid XML format. Could not find <changed_files> block.");
+  }
+
+  const validOps = ["CREATE", "UPDATE", "DELETE"];
+  for (const change of parsed) {
+    const upperOp = change.file_operation.toUpperCase();
+
+    if (!validOps.includes(upperOp)) {
+      throw new Error(`Invalid file_operation: ${change.file_operation} for file ${change.file_path}`);
+    }
+    if ((upperOp === "CREATE" || upperOp === "UPDATE") && !change.file_code) {
+      throw new Error(`Missing <file_code> for ${change.file_operation} operation on ${change.file_path}`);
+    }
+  }
+
+  return parsed;
 }
