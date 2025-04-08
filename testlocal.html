@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Local Storage Test</title>
+</head>
+<body>
+  <h1>Test Local Storage</h1>
+  <button onclick="saveData()">Save</button>
+  <button onclick="loadData()">Load</button>
+  <p id="output"></p>
+
+  <script>
+    function saveData() {
+      try {
+        localStorage.setItem('testKey', 'Hello, Local Storage!');
+        document.getElementById('output').textContent = 'Data saved!';
+      } catch (e) {
+        document.getElementById('output').textContent = 'Error: ' + e.message;
+      }
+    }
+
+    function loadData() {
+      try {
+        const data = localStorage.getItem('testKey');
+        document.getElementById('output').textContent = data || 'No data found.';
+      } catch (e) {
+        document.getElementById('output').textContent = 'Error: ' + e.message;
+      }
+    }
+  </script>
+</body>
+</html>
