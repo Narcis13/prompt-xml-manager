@@ -87,8 +87,9 @@ const ApplyChangesForm: React.FC = () => {
       const result = await previewChangesAction(xml, finalDirectory);
       setPreviewDiffs(result);
       setShowDiffModal(true);
-    } catch (error: any) {
-      setPreviewError(error?.message || "An error occurred while previewing changes.");
+    } catch (error: unknown) {
+      const parsedError = error instanceof Error ? error : new Error(String(error));
+      setPreviewError(parsedError?.message || "An error occurred while previewing changes.");
     }
   };
 
@@ -113,8 +114,9 @@ const ApplyChangesForm: React.FC = () => {
       setPreviewDiffs(null);
       setShowDiffModal(false);
       setSuccessMessage("Changes applied successfully!");
-    } catch (error: any) {
-      setErrorMessage(error?.message || "An error occurred while applying changes.");
+    } catch (error: unknown) {
+      const parsedError = error instanceof Error ? error : new Error(String(error));
+      setErrorMessage(parsedError?.message || "An error occurred while applying changes.");
     }
   };
 

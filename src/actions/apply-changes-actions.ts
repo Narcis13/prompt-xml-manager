@@ -85,8 +85,7 @@ export const previewChangesAction = async (xml: string, projectDirectory: string
         let oldCode = "";
         try {
           oldCode = await fs.readFile(fullPath, "utf-8");
-        } catch (err: any) {
-          // If readFile fails (likely ENOENT), it means file doesn't exist. This is fine for CREATE.
+        } catch {
           oldCode = "";
         }
 
@@ -119,7 +118,8 @@ export const previewChangesAction = async (xml: string, projectDirectory: string
           diff: diffStr
         });
       }
-    } catch (error: any) {
+    } catch (_error: unknown) {
+      const error = _error instanceof Error ? _error : new Error(String(_error));
       results.push({
         file_path,
         file_summary,
