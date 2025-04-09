@@ -1,4 +1,4 @@
-// framework.js
+// framework.js inspired by https://github.com/The-Pocket/PocketFlow.git
 const util = require('util');
 
 // Helper for async sleep
