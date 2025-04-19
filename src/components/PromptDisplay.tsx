@@ -1,6 +1,15 @@
+// =========================
+// CLIENT COMPONENT (Prompt Display)
+// =========================
 /**
  * @file PromptDisplay.tsx
- * @description Shows the currently selected prompt or, if "Apply Changes" is selected, shows the ApplyChangesForm.
+ * @description PromptDisplay is a client component that shows the selected prompt and allows editing variables.
+ * It uses a custom hook for local storage and can show a special form for applying XML changes.
+ *
+ * Key Next.js concepts:
+ * - Client Components: Use hooks, browser APIs, and interactivity.
+ * - Custom Hooks: useLocalStorage is used for persistent state.
+ * - Conditional Rendering: Shows different UI for 'Apply Changes' step.
  */
 
 'use client';

@@ -1,7 +1,15 @@
+// =========================
+// CLIENT COMPONENT (Main Page)
+// =========================
 /**
- * @file HomePage
- * @description Main landing page showing the sidebar (steps) and the selected prompt content
- * with a sleek dark theme and professional layout.
+ * @file page.tsx
+ * @description HomePage is a Next.js 15 Client Component (because it uses hooks and interactivity).
+ * It renders the main UI: sidebar navigation and the selected prompt content.
+ *
+ * Key Next.js concepts:
+ * - Client Components: Use 'use client' at the top, can use React hooks, browser APIs, and are interactive.
+ * - App Router: Files in app/ are routed by filename (page.tsx = / route).
+ * - Layout: This page is wrapped by RootLayout (layout.tsx).
  */
 
 'use client';

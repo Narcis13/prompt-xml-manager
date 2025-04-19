@@ -1,11 +1,14 @@
+// =========================
+// CLIENT COMPONENT (Diff Viewer)
+// =========================
 /**
  * @file DiffViewer.tsx
- * @description
- * Renders a collapsible list of file diffs using react-diff-viewer.
+ * @description DiffViewer is a client component that displays a list of file diffs in a collapsible format.
+ * Used for visualizing code changes in a user-friendly way.
  *
- * Each file's diff is shown with optional syntax highlight. By default
- * we treat them as text. For actual syntax highlight, we'd integrate
- * highlight libraries, but standard text diff is enough for demonstration.
+ * Key Next.js concepts:
+ * - Client Components: Use React hooks, browser APIs, and interactivity.
+ * - Visualization: Shows code diffs for user review.
  */
 
 "use client";

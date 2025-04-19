@@ -1,6 +1,14 @@
+// =========================
+// CLIENT COMPONENT (App Layout)
+// =========================
 /**
  * @file Layout.tsx
- * @description A layout component that wraps the application pages with a consistent theme and structure.
+ * @description Layout is a reusable client component for consistent page structure.
+ * It is NOT a Next.js layout (not in app/), but a normal React component for wrapping content.
+ *
+ * Key Next.js concepts:
+ * - Client Components: Use React hooks, browser APIs, and interactivity.
+ * - Used inside page.tsx to wrap the main content.
  */
 
 import React, { ReactNode } from 'react';

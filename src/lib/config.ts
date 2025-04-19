@@ -1,3 +1,15 @@
+// =========================
+// SHARED UTILITY (App Config)
+// =========================
+/**
+ * @file config.ts
+ * @description Utility for managing app configuration and environment variables.
+ * Used throughout the app for consistent config access.
+ *
+ * Key Next.js concepts:
+ * - Shared Utilities: Used in both server and client code (if only using NEXT_PUBLIC vars).
+ */
+
 // Configuration management for the application
 
 // Helper function to get environment variables with type safety

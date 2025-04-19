@@ -1,7 +1,14 @@
+// =========================
+// CLIENT COMPONENT (Diff Modal)
+// =========================
 /**
  * @file DiffModal.tsx
- * @description A modal component that displays file diffs with syntax highlighting and tab navigation
- * between multiple files. Includes a dark theme that matches the site's design.
+ * @description DiffModal is a client component that shows a modal with file diffs (before/after changes).
+ * Used in ApplyChangesForm to preview changes before applying.
+ *
+ * Key Next.js concepts:
+ * - Client Components: Use React hooks, browser APIs, and interactivity.
+ * - Visualization: Shows code diffs for user review.
  */
 
 "use client";
@@ -205,4 +212,4 @@ const DiffModal: React.FC<DiffModalProps> = ({ diffs, isOpen, onClose }) => {
   );
 };
 
-export default DiffModal; 
+export default DiffModal;

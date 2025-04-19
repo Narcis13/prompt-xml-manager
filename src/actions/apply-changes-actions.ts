@@ -1,3 +1,16 @@
+// =========================
+// SERVER ACTIONS (Next.js 15)
+// =========================
+/**
+ * @file apply-changes-actions.ts
+ * @description This file defines server actions for parsing XML and applying or previewing file changes.
+ * Server actions run on the server and can access the filesystem, environment variables, and more.
+ *
+ * Key Next.js concepts:
+ * - Server Actions: Use 'use server' at the top. Called from client components for backend logic.
+ * - File System Access: Only possible in server actions, not in client components.
+ */
+
 "use server";
 /**
  * @file apply-changes-actions.ts

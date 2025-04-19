@@ -1,7 +1,14 @@
+// =========================
+// CLIENT COMPONENT (Sidebar Navigation)
+// =========================
 /**
  * @file Sidebar.tsx
- * @description Navigation sidebar showing the different prompt steps
- * with an enhanced visual design using orange highlights.
+ * @description Sidebar is a client component that displays navigation for prompt steps.
+ * It receives props from the parent and updates the selected step.
+ *
+ * Key Next.js concepts:
+ * - Client Components: Use React state, props, and interactivity.
+ * - Used in page.tsx as the navigation sidebar.
  */
 
 import React from 'react';

@@ -1,3 +1,15 @@
+// =========================
+// SHARED UTILITY (File System)
+// =========================
+/**
+ * @file apply-changes.ts
+ * @description Utility functions for applying file changes (create, update, delete) on the server.
+ * Used by server actions to perform file operations securely.
+ *
+ * Key Next.js concepts:
+ * - Server Utilities: Used only in server actions, not directly in client components.
+ */
+
 import { promises as fs } from "fs";
 import { dirname, resolve, isAbsolute } from "path";
 

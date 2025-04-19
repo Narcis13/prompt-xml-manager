@@ -1,7 +1,13 @@
+// =========================
+// SHARED DATA (Prompt Templates)
+// =========================
 /**
  * @file constants.ts
- * @description Stores the five main prompts for the 01 Pro workflow,
- * including placeholders for variable injection.
+ * @description Stores prompt templates and related types for the app.
+ * Used by client components to display and fill prompts.
+ *
+ * Key Next.js concepts:
+ * - Shared Data: Used in both server and client code.
  */
 
 export interface PromptData {

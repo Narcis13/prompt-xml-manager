@@ -1,3 +1,15 @@
+// =========================
+// SHARED UTILITY (XML Parsing)
+// =========================
+/**
+ * @file xml-parser.ts
+ * @description Utility for parsing and validating XML code change instructions.
+ * Used by server actions to interpret AI-generated XML.
+ *
+ * Key Next.js concepts:
+ * - Shared Utilities: Used in server actions for backend logic.
+ */
+
 import { DOMParser } from "@xmldom/xmldom";
 
 interface ParsedFileChange {

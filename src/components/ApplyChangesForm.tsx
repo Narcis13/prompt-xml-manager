@@ -1,9 +1,13 @@
 "use client";
 /**
  * @file ApplyChangesForm.tsx
- * @description Form to paste XML from the O1 model and apply changes to a codebase.
- * Now includes a "Preview Changes" feature that shows a green/red diff of what
- * would be changed before actually applying them.
+ * @description ApplyChangesForm is a client component that lets users paste XML and preview/apply code changes.
+ * It uses a custom hook for local storage and calls server actions to apply changes.
+ *
+ * Key Next.js concepts:
+ * - Client Components: Use hooks, browser APIs, and interactivity.
+ * - Server Actions: Calls server actions (applyChangesAction, previewChangesAction) for backend logic.
+ * - Custom Hooks: useLocalStorage for persistent form state.
  */
 
 import React, { useState, useEffect } from "react";

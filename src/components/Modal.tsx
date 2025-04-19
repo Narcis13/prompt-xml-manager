@@ -1,7 +1,14 @@
+// =========================
+// CLIENT COMPONENT (Reusable Modal)
+// =========================
 /**
  * @file Modal.tsx
- * @description A reusable modal component for editing prompt variables
- * with support for multi-line text input
+ * @description Modal is a reusable client component for editing text in a popup.
+ * It is used for editing prompt variables in PromptDisplay.
+ *
+ * Key Next.js concepts:
+ * - Client Components: Use React hooks, browser APIs, and interactivity.
+ * - Reusability: Can be used anywhere a modal is needed.
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -92,4 +99,4 @@ const Modal: React.FC<ModalProps> = ({
   );
 };
 
-export default Modal; 
+export default Modal;

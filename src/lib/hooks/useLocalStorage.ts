@@ -1,6 +1,14 @@
+// =========================
+// CUSTOM HOOK (Client-side State)
+// =========================
 /**
  * @file useLocalStorage.ts
- * @description A custom hook to manage persisted state in local storage.
+ * @description Custom React hook for persisting state in local storage (browser only).
+ * Used by client components to remember form values between sessions.
+ *
+ * Key Next.js concepts:
+ * - Custom Hooks: Reusable logic for client components.
+ * - Client-side Only: Only works in client components (browser environment).
  */
 
 import { useState, useEffect } from 'react';
