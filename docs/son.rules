@@ -1,0 +1,5 @@
+Nextjs and Tailwind CSS but STRICTLY client only components and pages
+"use client" everywhere
+No server side code api endpoints in NextJS
+clear , well commented code generation with <ai_info> section as cooment in the top of each file telling what is meaningfull for the code in that specific  file
+-minimalist simple code

@@ -1,0 +1,616 @@
+Okay, let's start by planning the technical specification.
+
+<specification_planning>
+
+**1. Core System Architecture and Key Workflows**
+
+*   **Architecture:**
+    *   **Frontend:** Next.js Single-Page Application (SPA) using only client components (`"use client"`). Responsible for UI (IDE), SON code editing, and executing SON code via a client-side JavaScript interpreter. Uses Tailwind CSS for styling. Communicates with the backend via HTTP requests (`fetch`).
+    *   **Backend:** Separate BunJS server. Provides a RESTful API for persistence. Uses `bun:sqlite` to store SON environment data (classes, methods, potentially base environment). Handles API requests from the frontend. Optionally uses WebSockets (as in starter template) for potential future real-time features, but not essential for MVP core functionality.
+    *   **SON Interpreter:** A core JavaScript library/module within the Next.js client application. Parses and executes SON JSON according to the specification. Manages the execution environment (`$env`).
+*   **Key Workflows:**
+    *   **App Load:**
+        1.  Next.js serves the initial static HTML shell.
+        2.  Client-side JavaScript hydrates the React application.
+        3.  App fetches base environment definitions (core classes/methods) from the BunJS backend API (`/api/base-environment`).
+        4.  App fetches the list of user-defined classes from the backend (`/api/classes`).
+        5.  The SON interpreter's initial `$env` is populated with the base environment.
+        6.  The System Browser is populated with the fetched class list.
+    *   **Workspace Execution:**
+        1.  User types SON JSON into the Workspace editor.
+        2.  User clicks "Execute".
+        3.  The Workspace component retrieves the SON JSON content.
+        4.  It calls the SON interpreter's `evaluate` function with the SON code and the *current* client-side `$env`.
+        5.  The interpreter executes the code.
+        6.  Results (return value or error) are displayed in the results panel.
+        7.  Any output sent to the SON `Transcript` equivalent is displayed in the console panel.
+    *   **Saving a Method:**
+        1.  User writes a method definition (e.g., using `define:args:body:`) in the Workspace.
+        2.  User clicks "Save Method". (Need UI to specify the target class).
+        3.  The Workspace component extracts the class name, selector, args, and body JSON.
+        4.  It sends a POST request to the BunJS backend API (`/api/method`) with this data.
+        5.  The backend saves the method to the SQLite database, associating it with the specified class.
+        6.  (Optional/For Consideration): Update the client-side `$env`? Or require a refresh/explicit load? *Decision: Require explicit refresh/reload of browser/env for MVP simplicity.*
+    *   **System Browsing:**
+        1.  User clicks on a class name in the System Browser's class list.
+        2.  The app fetches the methods for that class from the backend (`/api/methods/{className}`).
+        3.  The method list pane is populated.
+        4.  User clicks on a method name in the method list.
+        5.  The app fetches the specific SON source for that method (`/api/method/{className}/{selector}`). *Alternative: Fetch all methods' source initially? Decision: Fetch on demand for simplicity.*
+        6.  The SON JSON source code is displayed in the code view pane.
+
+*   **Potential Challenges:**
+    *   Ensuring the Next.js app remains *strictly* client-side, relying solely on the BunJS API.
+    *   Correctly implementing non-local returns (`^`) in the JS interpreter.
+    *   Defining a robust structure for the client-side `$env` and managing its state.
+    *   Efficiently handling potentially large SON structures if the environment grows.
+
+**2. Project Structure and Organization**
+
+*   **Root Directory:** `son-environment/`
+    *   `client/`: Next.js application (`create-next-app`)
+        *   `package.json`
+        *   `next.config.mjs` (configured for static export if needed, though standard dev server is fine)
+        *   `tailwind.config.js`
+        *   `postcss.config.js`
+        *   `public/`
+        *   `src/`
+            *   `app/`: Next.js App Router structure (layout, page) - all marked `"use client"`.
+                *   `layout.tsx` (Root layout, includes Tailwind base styles)
+                *   `page.tsx` (Main application page, renders IDE components)
+            *   `components/`: Reusable React components (all `"use client"`).
+                *   `IDE.tsx` (Main container: Workspace + System Browser)
+                *   `Workspace.tsx`
+                *   `SystemBrowser.tsx`
+                *   `ClassList.tsx`
+                *   `MethodList.tsx`
+                *   `CodeViewer.tsx` (Could use a JSON viewer library)
+                *   `ConsoleOutput.tsx`
+                *   `ui/` (Minimal shared UI elements like Button, Input, Panel if needed)
+            *   `lib/`: Core logic and utilities.
+                *   `son/`: SON Interpreter implementation.
+                    *   `interpreter.ts`: Core `evaluate` function, environment handling.
+                    *   `types.ts`: TypeScript types for SON structures.
+                    *   `errors.ts`: Custom error classes (MessageNotUnderstood, etc.).
+                    *   `environment.ts`: Logic for managing the `$env` object.
+                    *   `core.ts`: Definition of the base SON environment (or fetched from API).
+                *   `apiClient.ts`: Functions to interact with the BunJS backend API (`fetch` wrappers).
+            *   `hooks/`: Custom React hooks (e.g., `useSonEnvironment`).
+            *   `styles/`: Global CSS (minimal, primarily Tailwind).
+            *   `contexts/`: React Context for potentially shared state (e.g., the `$env`).
+    *   `server/`: BunJS backend application.
+        *   `package.json`
+        *   `tsconfig.json`
+        *   `server.ts`: Main Bun server entry point (based on starter, adapted for SON).
+        *   `db.ts`: Database initialization and schema setup.
+        *   `api/`: API route handlers.
+            *   `classes.ts`: Handlers for `/api/classes`, `/api/methods/*`.
+            *   `environment.ts`: Handler for `/api/base-environment`.
+        *   `data/`: SQLite database file.
+            *   `son_environment.sqlite`
+    *   `.gitignore`
+    *   `README.md`
+
+*   **Rationale:** Clear separation between frontend (Next.js client) and backend (Bun API). Internal client structure follows standard Next.js/React conventions. SON interpreter logic is encapsulated in `client/src/lib/son/`.
+
+**3. Detailed Feature Specifications**
+
+*   Breakdown each feature from the request into specific implementation steps, considering the chosen architecture.
+*   Specify function signatures, data structures, API request/response formats.
+*   Detail error handling for each step.
+
+**4. Database Schema Design**
+
+*   Define tables needed for persistence based on decisions made (Classes, Methods, Base Environment).
+*   Specify fields, types (TEXT for JSON blobs), primary keys, foreign keys, indexes.
+*   *Initial Schema:*
+    *   `son_classes`: `id` (TEXT PRIMARY KEY UUID), `name` (TEXT UNIQUE NOT NULL), `created_at` (DATETIME DEFAULT CURRENT_TIMESTAMP)
+    *   `son_methods`: `id` (TEXT PRIMARY KEY UUID), `class_id` (TEXT NOT NULL REFERENCES son_classes(id)), `selector` (TEXT NOT NULL), `arguments_json` (TEXT NOT NULL), `body_json` (TEXT NOT NULL), `created_at` (DATETIME DEFAULT CURRENT_TIMESTAMP), UNIQUE(`class_id`, `selector`)
+    *   `son_base_environment`: `key` (TEXT PRIMARY KEY), `value_json` (TEXT NOT NULL) - To store core objects/methods JSON.
+
+**5. Design System and Component Architecture**
+
+*   **Design System (Tailwind):** Minimalist. Use default Tailwind theme. Define primary color for interactive elements. Focus on functional layout (panels for browser, editor, results).
+*   **Component Architecture (React - Client):**
+    *   All components marked `"use client"`.
+    *   Top-level `App` or `Page` component manages layout and potentially fetches initial data.
+    *   `IDE` component orchestrates `Workspace` and `SystemBrowser`.
+    *   State Management: Start with `useState` and prop drilling. If state becomes complex, introduce `useContext` or a lightweight state manager like Zustand. The core `$env` object could be managed via context.
+    *   Define props interfaces clearly using TypeScript.
+
+**6. Data Flow and State Management**
+
+*   **Client -> Server:** User actions trigger `fetch` calls from `apiClient.ts` to the BunJS API endpoints.
+*   **Server -> Client:** API responses (JSON) are received by `apiClient.ts` and used to update React component state (`useState`, `setState` from context).
+*   **Client State:**
+    *   `$env`: The core SON execution environment. Likely managed in a React Context, initialized with base env fetched from API. Needs careful handling if methods are added dynamically without full reload. *MVP Decision: Modification requires explicit save + page refresh or explicit "reload environment" button.*
+    *   Workspace State: Editor content, execution result, console output (`useState`).
+    *   System Browser State: List of classes, selected class, list of methods, selected method, method source code (`useState`). Data fetched via `apiClient`.
+
+**Potential Edge Cases/Errors:**
+
+*   **SON Interpreter:** Invalid SON JSON syntax, runtime errors (message not understood, variable not found, incorrect argument types), stack overflow (deep recursion), non-local return from top-level script.
+*   **API:** Network errors, invalid request data, database errors (constraint violations), class/method not found.
+*   **UI:** Handling large amounts of data in lists/editors, responsiveness, state synchronization issues if not managed carefully.
+
+**Refinement:**
+
+*   Confirm the exact representation of "classes" in SON and how they are stored/retrieved. *Decision: Classes are just objects identified by name. The DB stores the name (`son_classes`) and links methods to it (`son_methods`). The actual class object structure is defined by the methods attached to it.*
+*   Solidify the base environment loading strategy. *Decision: Dedicated API endpoint `/api/base-environment` returning a JSON object representing the core definitions to be merged into the initial `$env`.*
+*   Adapt the BunJS starter code: remove agent/message logic, replace with SON class/method persistence logic and API endpoints. Keep WebSocket structure but make its use optional/deferred.
+
+This planning provides a solid foundation for generating the detailed specification.
+
+</specification_planning>
+
+---
+
+# SON Environment (Smalltalk Object Notation Environment) Technical Specification
+
+## 1. System Overview
+
+*   **Core Purpose:** To provide a web-based development and execution environment inspired by Smalltalk, using a specific JSON dialect (SON - Smalltalk Object Notation) as the code representation. The environment facilitates experimentation with message-passing paradigms, code-as-data, and AI agent development.
+*   **Value Proposition:** Offers a unique, minimalist platform for enthusiasts to explore Smalltalk concepts and their application to AI within a modern web context, leveraging the explicit structure of SON.
+*   **Key Workflows:**
+    *   Loading the environment (fetching base definitions and user classes/methods).
+    *   Writing and executing SON code snippets in a Workspace.
+    *   Browsing persisted classes and methods via a System Browser.
+    *   Persisting new/modified SON methods to the backend.
+    *   (Future) Interacting with browser/external APIs via SON wrappers.
+*   **System Architecture:**
+    *   **Frontend:** Next.js SPA (Client Components Only - `"use client"`). Renders the IDE interface (Workspace, System Browser), includes the SON JavaScript interpreter, manages client-side state, and communicates with the backend API. Uses Tailwind CSS for styling.
+    *   **Backend:** BunJS Server. Provides a RESTful HTTP API for persistence using `bun:sqlite`. Manages the storage of SON classes, methods, and base environment definitions. *Does not* use any Next.js server-side features (no Next.js API routes, no Server Components).
+    *   **SON Interpreter:** A JavaScript module running entirely within the client's browser. Parses and executes SON JSON, manages the execution environment (`$env`), and handles runtime errors.
+
+## 2. Project Structure
+
+```
+son-environment/
+├── client/                   # Next.js Frontend Application
+│   ├── package.json
+│   ├── next.config.mjs       # Standard Next.js config
+│   ├── tailwind.config.js
+│   ├── postcss.config.js
+│   ├── public/               # Static assets
+│   ├── src/
+│   │   ├── app/              # Next.js App Router (ALL "use client")
+│   │   │   ├── layout.tsx    # Root Layout ("use client")
+│   │   │   └── page.tsx      # Main Application Page ("use client")
+│   │   ├── components/       # React UI Components (ALL "use client")
+│   │   │   ├── IDE.tsx
+│   │   │   ├── Workspace.tsx
+│   │   │   ├── SystemBrowser.tsx
+│   │   │   ├── ClassList.tsx
+│   │   │   ├── MethodList.tsx
+│   │   │   ├── CodeViewer.tsx
+│   │   │   ├── ConsoleOutput.tsx
+│   │   │   └── ui/           # Shared primitive components (Button, Panel, etc.)
+│   │   ├── lib/
+│   │   │   ├── son/          # SON Interpreter Logic
+│   │   │   │   ├── interpreter.ts  # <ai_info>Core evaluation logic for SON JSON.</ai_info>
+│   │   │   │   ├── environment.ts  # <ai_info>Manages the $env execution context.</ai_info>
+│   │   │   │   ├── types.ts        # <ai_info>TypeScript types for SON structures.</ai_info>
+│   │   │   │   ├── errors.ts       # <ai_info>Custom runtime error classes.</ai_info>
+│   │   │   │   └── core_definitions.ts # <ai_info>(Alternative) Hardcoded base env or structure for fetched env.</ai_info>
+│   │   │   └── apiClient.ts  # <ai_info>Typed wrappers for fetching data from the BunJS backend API.</ai_info>
+│   │   ├── hooks/            # Custom React Hooks
+│   │   │   └── useSonEnvironment.ts # <ai_info>Hook to manage/access the shared SON $env state.</ai_info>
+│   │   ├── contexts/         # React Contexts
+│   │   │   └── SonEnvironmentContext.tsx # <ai_info>Provides the SON $env and related functions.</ai_info>
+│   │   └── styles/
+│   │       └── globals.css   # Tailwind directives and base styles
+│   └── tsconfig.json
+├── server/                   # BunJS Backend API Server
+│   ├── package.json
+│   ├── server.ts             # <ai_info>Main Bun server setup, routing, API endpoint definitions.</ai_info>
+│   ├── db.ts                 # <ai_info>SQLite database initialization, schema creation, query utilities.</ai_info>
+│   ├── api/                  # <ai_info>Request handler logic for API endpoints.</ai_info>
+│   │   ├── persistenceHandlers.ts # <ai_info>Handlers for classes, methods CRUD.</ai_info>
+│   │   └── environmentHandlers.ts # <ai_info>Handler for fetching base environment.</ai_info>
+│   ├── data/
+│   │   └── son_environment.sqlite # SQLite database file
+│   └── tsconfig.json
+├── .gitignore
+└── README.md
+```
+**Note:** All `.tsx` files within `client/src/` will contain `"use client";` at the top.
+
+## 3. Feature Specification
+
+### 3.1 Core SON Execution Engine (Client-Side)
+
+*   **User Story:** As a developer, I want a JavaScript engine that can execute code written in the specified SON JSON dialect within the browser.
+*   **Requirements:** Implement interpretation logic for all SON constructs defined in the `<project_request>` specification. Manage lexical scoping (`$env`), handle returns (local and non-local), and provide basic error reporting.
+*   **Implementation Steps (`client/src/lib/son/interpreter.ts`):**
+    1.  **`evaluate(node: SonValue, environment: SonEnvironment): any` function:**
+        *   This is the main recursive evaluation function.
+        *   Takes a SON JSON node and the current `SonEnvironment` object.
+        *   Uses a `switch` or `if/else if` chain based on the `typeof node` and its structure (Array, Object, primitive) to determine the SON construct type.
+    2.  **Literals:** If `node` is a number, string, boolean, or null, return it directly.
+    3.  **Symbols (`{"#": "symbol"}`):** Create/return a unique Symbol representation or a dedicated Symbol object wrapper.
+    4.  **Variables (`$x`):**
+        *   Look up `x` in the `environment` object (and potentially its prototype chain for lexical scope).
+        *   Call `environment.get("x")`.
+        *   If not found, throw `VariableNotFoundError`.
+    5.  **Sequences (`[stmt1, stmt2, ...]`):**
+        *   Evaluate each statement in order within the *same* environment.
+        *   Return the result of the *last* statement. Handle potential non-local returns propagating from within the sequence.
+    6.  **Unary Sends (`[receiver, selector]`):**
+        *   Evaluate `receiver`.
+        *   Look up the method corresponding to `selector` on the receiver object (or its "class"). This involves a `lookupMethod(receiver, selector)` helper.
+        *   If found, call the method implementation (which might be a JS function or another SON structure to be evaluated) with the receiver as context (`this` or passed explicitly).
+        *   If not found, throw `MessageNotUnderstoodError`.
+    7.  **Binary Sends (`[receiver, operator, argument]`):**
+        *   Evaluate `receiver`.
+        *   Evaluate `argument`.
+        *   Look up the method for `operator` on the receiver.
+        *   If found, call it with the receiver and the evaluated argument.
+        *   If not found, throw `MessageNotUnderstoodError`.
+    8.  **Keyword Sends (`[receiver, "selector:with:", arg1, arg2]`):**
+        *   Evaluate `receiver`.
+        *   Evaluate all `argN`.
+        *   Look up the method for `"selector:with:"` on the receiver.
+        *   If found, call it with the receiver and evaluated arguments.
+        *   If not found, throw `MessageNotUnderstoodError`.
+    9.  **Assignments (`["var:", expr]`):**
+        *   Evaluate `expr`.
+        *   Call `environment.set("var", result)`. Stores/updates "var" in the *current* lexical environment.
+    10. **Method Definitions (`["define:args:body:", selector, ["argNames"], [body...]]`):**
+        *   This is a special form, likely handled directly by the environment or a dedicated `Compiler` object rather than standard message send lookup.
+        *   It associates the `selector`, `argNames`, and `body` (unevaluated SON JSON) with the current receiver (often `$env` or a class object within it).
+        *   `environment.defineMethod(selector, argNames, body)`
+    11. **Block Closures (`[["args"], "=>:", [body...]]`):**
+        *   Create a closure object/function containing:
+            *   Argument names (`args`).
+            *   The block body (`body` - unevaluated SON JSON).
+            *   A reference to the *current* lexical `environment` (captured scope).
+        *   This closure object should respond to messages like `value:`, `value:value:`, etc.
+        *   When `value:` is sent:
+            *   Create a *new* environment prototypically inheriting from the captured environment.
+            *   Bind the arguments passed to `value:` to the `argNames` in the new environment.
+            *   Evaluate the `body` within this new environment.
+            *   Handle implicit return (value of last statement).
+    12. **Return Statements (`["^", expr]`):**
+        *   Evaluate `expr`.
+        *   Requires context tracking (call stack).
+        *   If inside a block: Throw a special `NonLocalReturnError` containing the value and targeting the context of the method that *defined* the block.
+        *   If inside a method: Throw a `LocalReturnError` containing the value.
+        *   The `evaluate` function callers (especially for method/block execution) must `try...catch` these errors to handle returns correctly. Method execution context catches both, block execution context only catches `LocalReturnError` (for its own implicit return) and re-throws `NonLocalReturnError`.
+    13. **Cascades (`[receiver, "cascade:", [msg1, msg2, ...]]`):**
+        *   Evaluate `receiver` *once*.
+        *   Evaluate each message (`msg1`, `msg2`, etc.) by sending it to the *original* receiver result.
+        *   Return the original receiver result.
+    14. **Environment (`$env`):**
+        *   Represented by a JavaScript object or `Map` (`client/src/lib/son/environment.ts`).
+        *   Needs methods like `get(varName)`, `set(varName, value)`, `defineMethod(selector, args, body)`, `lookupMethod(selector)`.
+        *   Supports prototypical inheritance for lexical scoping (e.g., block environment inherits from defining environment).
+*   **Error Handling:**
+    *   Define custom error classes (`SonError`, `MessageNotUnderstoodError`, `VariableNotFoundError`, `ArgumentError`, `NonLocalReturnError`, `LocalReturnError`) in `client/src/lib/son/errors.ts`.
+    *   The `evaluate` function should throw these errors appropriately.
+    *   Top-level execution call (e.g., in Workspace) should catch errors and display user-friendly messages.
+
+### 3.2 SON IDE Interface (Client-Side SPA)
+
+*   **User Story:** As a user, I want an interface to write, execute, browse, and manage SON code.
+*   **Components:**
+    *   **`IDE.tsx`:** Main layout component using CSS Grid or Flexbox to arrange `Workspace` and `SystemBrowser`.
+    *   **`Workspace.tsx`:**
+        *   **Requirements:** Editor for SON JSON, Execute button, Result display area, Console output area, Save Method button (+ inputs for class name/selector if not inferred).
+        *   **Implementation:**
+            1.  Use a code editor component (e.g., `react-simple-code-editor` or potentially Monaco/CodeMirror configured for JSON) for input (`useState` for content).
+            2.  "Execute" button onClick handler:
+                *   Parse the editor content (handle JSON parse errors).
+                *   Get the current `$env` from `SonEnvironmentContext`.
+                *   Inject a `Transcript` object into `$env` if not present (see below).
+                *   Call `evaluate(parsedSon, env)` within a `try...catch` block.
+                *   Update state for result display (formatted result or error message).
+                *   Update state for console display (based on `Transcript` calls).
+            3.  Result Panel: Display formatted result (`JSON.stringify` or custom formatter) or error message.
+            4.  Console Panel (`ConsoleOutput.tsx`): Display messages sent to `Transcript`. Requires a `Transcript` object in the SON `$env` whose methods (e.g., `show:`) append to a React state managed by `Workspace` or context.
+            5.  "Save Method" button onClick handler:
+                *   (Need UI to specify target class name, potentially infer selector from `define:` form).
+                *   Extract class name, selector, args JSON, body JSON from the editor content (requires parsing/validation).
+                *   Call `apiClient.saveMethod(className, selector, args, body)`.
+                *   Provide user feedback (success/error).
+    *   **`SystemBrowser.tsx`:**
+        *   **Requirements:** Display list of classes, list of methods for selected class, SON source for selected method.
+        *   **Implementation:**
+            1.  Layout: Three panels (Classes, Methods, Code View).
+            2.  **`ClassList.tsx`:**
+                *   Fetch classes using `apiClient.getClasses()` on mount (`useEffect`).
+                *   Store class names in state (`useState`).
+                *   Render a list of clickable class names.
+                *   On click, update a shared state (or pass callback) indicating the selected class.
+            3.  **`MethodList.tsx`:**
+                *   Takes `selectedClassName` as prop.
+                *   When `selectedClassName` changes (`useEffect`), fetch methods using `apiClient.getMethods(selectedClassName)`.
+                *   Store method selectors in state (`useState`).
+                *   Render a list of clickable method selectors.
+                *   On click, update shared state/callback with selected selector.
+            4.  **`CodeViewer.tsx`:**
+                *   Takes `selectedClassName` and `selectedMethodSelector` as props.
+                *   When props change (`useEffect`), fetch method source using `apiClient.getMethodSource(className, selector)`.
+                *   Store fetched SON JSON (or error) in state (`useState`).
+                *   Display the SON JSON, pretty-printed. Use a syntax highlighting component if desired.
+*   **Error Handling:** Handle `fetch` errors in `apiClient`, display errors from API calls in the UI, handle JSON parsing errors in Workspace.
+
+### 3.3 Persistence (Client-Backend Interaction)
+
+*   **User Story:** As a user, I want my defined classes and methods to be saved so I can reload the environment later.
+*   **Backend API (BunJS - `server/server.ts`, `server/api/*.ts`):**
+    *   `/api/base-environment` (GET):
+        *   Reads definitions from `son_base_environment` table.
+        *   Returns a single JSON object merging all base definitions. `{"ClassName": {"#": "ClassName", "methods": {...}}, "CoreObject": ...}`
+    *   `/api/classes` (GET):
+        *   Queries `son_classes` table.
+        *   Returns `{"classes": ["ClassName1", "ClassName2", ...]}`.
+    *   `/api/methods/{className}` (GET):
+        *   Finds `class_id` for `{className}` in `son_classes`.
+        *   Queries `son_methods` for matching `class_id`.
+        *   Returns `{"methods": ["selector1", "selector2:arg:", ...]}`.
+    *   `/api/method/{className}/{selector}` (GET):
+        *   Finds `class_id`.
+        *   Queries `son_methods` for matching `class_id` and `{selector}`.
+        *   Returns `{"selector": "...", "arguments": [...], "body": [...]}` (reconstructed SON JSON method definition).
+    *   `/api/method` (POST):
+        *   Expects JSON body: `{"className": "...", "selector": "...", "arguments": [...], "body": [...]}`.
+        *   Find or create `class_id` for `className` in `son_classes`. Handle potential name collisions if creating.
+        *   Insert or update the method in `son_methods` table (using `ON CONFLICT` or separate INSERT/UPDATE). JSON `arguments` and `body` are stored as TEXT.
+        *   Returns success (201 Created or 200 OK) or error (400 Bad Request, 500 Server Error).
+*   **Frontend (`client/src/lib/apiClient.ts`):**
+    *   Implement async functions using `fetch` for each API endpoint.
+    *   Include error handling (checking response.ok, catching network errors).
+    *   Define TypeScript types for request bodies and response payloads.
+*   **Data Synchronization:**
+    *   Initial load fetches base env + class list.
+    *   Browser fetches method lists/sources on demand.
+    *   Saving is explicit via Workspace "Save Method" button.
+    *   *Decision:* No automatic synchronization. A page refresh or explicit "Reload Environment" button is required to see persisted changes reflected in the running `$env` or System Browser after saving (simplifies MVP state management).
+
+### 3.4 Application Capabilities (AI Agent Focus)
+
+*   **JavaScript Interoperability:**
+    *   **Requirement:** Allow SON code to call essential JS/browser functions.
+    *   **Implementation:**
+        1.  Define a `JSBridge` object within the base SON environment (`son_base_environment` table or hardcoded).
+        2.  Add methods to `JSBridge` like `log:`, `fetch:options:`, `setTimeout:delay:`.
+        3.  The SON interpreter needs special handling when a message is sent to `JSBridge` (or specific methods). Instead of looking up SON code, it calls the corresponding JS function (e.g., `console.log`, `fetch`, `setTimeout`).
+        4.  Handle promise resolution for async operations like `fetch`. The interpreter might need to support async evaluation or a callback mechanism within SON. *Decision for MVP: `fetch` could be simplified to be synchronous-like via internal await, or initially return a Promise object that needs explicit handling in SON if async is needed.*
+*   **Agent Communication:**
+    *   **Requirement:** Leverage message passing for agent interaction.
+    *   **Implementation:** This is inherent in the SON execution model. Different "agent" objects within the `$env` can send messages to each other using standard SON message send syntax (`[receiver, selector, ...args]`). No special implementation needed beyond the core interpreter.
+*   **Code as Data:**
+    *   **Requirement:** SON code (methods) should be manipulable within the SON environment.
+    *   **Implementation:** Since methods are stored and retrieved as SON JSON, an agent (represented by an object in `$env`) could theoretically:
+        1.  Fetch its own method definition using a hypothetical `System >> getClass:selector:` method (or via `JSBridge` calling the backend API).
+        2.  Manipulate the retrieved JSON array/object using standard SON collection methods (if implemented in the base env).
+        3.  Save the modified method back using `System >> saveMethod:class:selector:args:body:` (or `JSBridge`).
+
+## 4. Database Schema
+
+*   **Database:** SQLite (`bun:sqlite`)
+*   **File:** `server/data/son_environment.sqlite`
+
+### 4.1 Tables
+
+*   **`son_classes`**
+    *   `id` (TEXT PRIMARY KEY): UUID generated by the server.
+    *   `name` (TEXT UNIQUE NOT NULL): The name of the class/object used in SON.
+    *   `created_at` (DATETIME DEFAULT CURRENT_TIMESTAMP)
+    *   *Indexes:* `idx_son_classes_name` ON `name`
+
+*   **`son_methods`**
+    *   `id` (TEXT PRIMARY KEY): UUID generated by the server.
+    *   `class_id` (TEXT NOT NULL): Foreign key referencing `son_classes.id`.
+    *   `selector` (TEXT NOT NULL): The method selector (e.g., "value:", "at:put:").
+    *   `arguments_json` (TEXT NOT NULL): JSON string representation of the argument names array (e.g., `'["a", "b"]'`).
+    *   `body_json` (TEXT NOT NULL): JSON string representation of the method body array (e.g., `'[["^", ["$a", "+", "$b"]]]'`).
+    *   `created_at` (DATETIME DEFAULT CURRENT_TIMESTAMP)
+    *   *Constraints:* `UNIQUE(class_id, selector)`
+    *   *Indexes:* `idx_son_methods_class_id` ON `class_id`
+
+*   **`son_base_environment`**
+    *   `key` (TEXT PRIMARY KEY): The top-level key for the base definition (e.g., "Number", "String", "Transcript", "JSBridge").
+    *   `value_json` (TEXT NOT NULL): JSON string representation of the SON object/class definition associated with the key. This would include its methods.
+
+## 5. Server Actions (BunJS API Handlers)
+
+*   **Location:** `server/api/*.ts` (handlers called from `server/server.ts` router)
+*   **Note:** Replaces Next.js Server Actions concept. These are standard HTTP request handlers.
+
+### 5.1 Database Actions
+
+*   **`getBaseEnvironment()`:**
+    *   Description: Fetches all key-value pairs from `son_base_environment`.
+    *   Input: None.
+    *   Returns: JSON object `{ [key: string]: SonValue }`.
+    *   SQL: `SELECT key, value_json FROM son_base_environment;` (Post-process to parse `value_json`).
+*   **`getClasses()`:**
+    *   Description: Fetches all class names.
+    *   Input: None.
+    *   Returns: JSON object `{"classes": string[]}`.
+    *   SQL: `SELECT name FROM son_classes ORDER BY name;`
+*   **`getMethods(className: string)`:**
+    *   Description: Fetches all method selectors for a given class name.
+    *   Input: `className` (from URL path).
+    *   Returns: JSON object `{"methods": string[]}` or 404 if class not found.
+    *   SQL: `SELECT m.selector FROM son_methods m JOIN son_classes c ON m.class_id = c.id WHERE c.name = ? ORDER BY m.selector;` (Parameter: `className`).
+*   **`getMethodSource(className: string, selector: string)`:**
+    *   Description: Fetches the arguments and body JSON for a specific method.
+    *   Input: `className`, `selector` (from URL path).
+    *   Returns: JSON object `{"selector": string, "arguments": SonValue[], "body": SonValue[]}` or 404.
+    *   SQL: `SELECT m.selector, m.arguments_json, m.body_json FROM son_methods m JOIN son_classes c ON m.class_id = c.id WHERE c.name = ? AND m.selector = ?;` (Parameters: `className`, `selector`). (Post-process to parse JSON strings).
+*   **`saveMethod(data: {className: string, selector: string, arguments: SonValue[], body: SonValue[]})`:**
+    *   Description: Creates or updates a method definition. Creates the class if it doesn't exist.
+    *   Input: JSON body containing method details.
+    *   Returns: 201 Created or 200 OK on success, 400 Bad Request, 500 Internal Server Error.
+    *   SQL:
+        1.  `INSERT INTO son_classes (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING;` (Parameters: `crypto.randomUUID()`, `data.className`).
+        2.  `SELECT id FROM son_classes WHERE name = ?;` (Parameter: `data.className`). Get `class_id`.
+        3.  `INSERT INTO son_methods (id, class_id, selector, arguments_json, body_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(class_id, selector) DO UPDATE SET arguments_json = excluded.arguments_json, body_json = excluded.body_json;` (Parameters: `crypto.randomUUID()`, `class_id`, `data.selector`, `JSON.stringify(data.arguments)`, `JSON.stringify(data.body)`).
+
+### 5.2 Other Actions
+
+*   **WebSocket Handling (Optional - from starter template):**
+    *   Can be kept for potential future real-time features (e.g., broadcasting environment changes, multi-user interaction) but is not core to the MVP functionality described. If kept, the message types should be adapted (e.g., `method_saved`, `class_created`).
+
+## 6. Design System
+
+### 6.1 Visual Style (Tailwind CSS)
+
+*   **Color Palette:**
+    *   Background: `bg-white` / `dark:bg-gray-900`
+    *   Text: `text-gray-900` / `dark:text-gray-100`
+    *   Panels/Borders: `border-gray-300` / `dark:border-gray-700`
+    *   Primary Accent (Buttons, selections): `bg-blue-500`, `text-white`, `hover:bg-blue-600`
+    *   Secondary Accent (e.g., Code): `text-purple-600`, `text-green-600` (leverage editor theme or simple distinctions)
+    *   Error: `text-red-600`, `bg-red-100`
+*   **Typography:**
+    *   Font Family: Tailwind default sans-serif (`font-sans`).
+    *   Code Font Family: Tailwind default mono (`font-mono`).
+    *   Sizes: Use Tailwind size scale (`text-xs`, `text-sm`, `text-base`, etc.).
+*   **Component Styling:** Use standard Tailwind utility classes. Minimal custom CSS. Components like Buttons, Inputs should have consistent padding, borders, and focus rings.
+*   **Spacing and Layout:** Use Tailwind spacing scale (`p-2`, `m-4`, `space-x-4`, etc.). Employ Flexbox and CSS Grid for layout (`flex`, `grid`, `grid-cols-*`).
+
+### 6.2 Core Components (Conceptual - in `client/src/components/ui/`)
+
+*   **Layout:** `IDE.tsx` uses Flexbox/Grid to create resizable panes (potentially using a library like `react-resizable-panels`).
+*   **Navigation:** N/A for single-page IDE.
+*   **Shared Components:**
+    *   `Button`: Standard button styles, takes `onClick`, `children`, variant props.
+    *   `Panel`: Container with border and padding.
+    *   `CodeEditor`: Wrapper around chosen editor library. Props: `value`, `onChange`, `language`.
+    *   `ListView`: Generic component for rendering clickable lists (for classes/methods). Props: `items`, `onSelect`, `selectedItem`.
+*   **Interactive States:** Use Tailwind variants (`hover:`, `focus:`, `disabled:`).
+
+## 7. Component Architecture
+
+### 7.1 Server Components
+
+*   **Not Applicable.** The project rules mandate `"use client"` everywhere in the Next.js application. All components will be Client Components.
+
+### 7.2 Client Components (`client/src/`)
+
+*   **Directive:** All component files (`.tsx`) must start with `"use client";`.
+*   **State Management:**
+    *   Local state: `React.useState` for component-specific UI state (e.g., editor content, current selection).
+    *   Shared state: `React.useContext` (`SonEnvironmentContext`) for the global `$env` object and potentially the `Transcript` output buffer. A more robust state manager (Zustand) could be considered if context becomes unwieldy.
+    *   Data Fetching State: Managed within components using `useEffect` and `useState` to store fetched data, loading status, and errors.
+*   **Event Handlers:** Standard React `onClick`, `onChange`, etc. handlers calling component logic, context functions, or `apiClient` functions.
+*   **UI Interactions:** Direct manipulation of state based on user input triggers re-renders.
+*   **Props Interface (TypeScript):** Define clear `interface Props { ... }` for each component.
+
+**Example (`Workspace.tsx`):**
+
+```typescript
+// <ai_info>This component provides the SON code editor, execution controls, and result/console display.</ai_info>
+"use client";
+
+import React, { useState, useContext } from 'react';
+import { SonEnvironmentContext } from '@/contexts/SonEnvironmentContext';
+import { apiClient } from '@/lib/apiClient';
+import { evaluate } from '@/lib/son/interpreter';
+// Import CodeEditor, Button, Panel etc.
+
+interface WorkspaceProps {
+  // Potentially props to interact with SystemBrowser selection
+}
+
+export function Workspace(props: WorkspaceProps) {
+  const [code, setCode] = useState<string>('// Enter SON JSON here\n[\n  [1, "+", 2]\n]');
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [consoleOutput, setConsoleOutput] = useState<string[]>([]);
+  const { environment, reloadEnvironment } = useContext(SonEnvironmentContext); // Assuming context provides env
+
+  const handleExecute = () => {
+    setResult(null);
+    setError(null);
+    setConsoleOutput([]); // Clear console on new execution
+    try {
+      const parsedCode = JSON.parse(code);
+      // Prepare environment for execution (e.g., add Transcript)
+      const executionEnv = environment.createChild(); // Create scope for execution? Or use root? Needs decision.
+      const transcriptMessages: string[] = [];
+      executionEnv.set('Transcript', {
+         // This is a JS object representing the SON Transcript
+         // Need a mechanism in the interpreter to call JS functions for specific objects/methods
+         show: (arg: any) => {
+             const message = String(arg); // Or more sophisticated SON->String conversion
+             transcriptMessages.push(message);
+             setConsoleOutput(prev => [...prev, message]); // Update console live
+         }
+      });
+
+      const executionResult = evaluate(parsedCode, executionEnv);
+      setResult(JSON.stringify(executionResult, null, 2));
+    } catch (e: any) {
+      setError(e.message || 'An unknown execution error occurred.');
+      if (e instanceof SyntaxError) {
+          setError(`JSON Syntax Error: ${e.message}`);
+      } else {
+           // Handle SonError types specifically if needed
+          setError(`Runtime Error: ${e.message}`);
+      }
+    }
+  };
+
+  const handleSave = async () => {
+     // TODO: Add UI to get className, parse method definition from 'code'
+     // const { className, selector, args, body } = parseMethodDefinition(code);
+     // try {
+     //   await apiClient.saveMethod(className, selector, args, body);
+     //   alert('Method saved!');
+     //   // Optionally trigger environment reload or browser refresh notification
+     // } catch (err) {
+     //   alert(`Failed to save: ${err.message}`);
+     // }
+     alert("Save functionality not fully implemented.");
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+       {/* Panel for Editor */}
+       {/* Panel for Buttons (Execute, Save) */}
+       {/* Panel for Results */}
+       {/* Panel for Console Output */}
+    </div>
+  );
+}
+```
+
+## 8. Authentication & Authorization
+
+*   **Not Applicable for MVP.** No user accounts or protected resources are required by the initial request.
+
+## 9. Data Flow
+
+1.  **Initial Load:** `page.tsx` -> `useContext(SonEnvironmentContext)` -> `apiClient.getBaseEnvironment()` -> Bun API -> SQLite `son_base_environment` -> API Response -> Context State update (`$env`). `ClassList` -> `apiClient.getClasses()` -> Bun API -> SQLite `son_classes` -> API Response -> Component State update.
+2.  **Execution:** `Workspace` (User Input) -> Execute Button `onClick` -> `evaluate(code, $env from context)` -> SON Interpreter Logic -> Update local state (`result`, `error`, `consoleOutput`).
+3.  **Saving:** `Workspace` (User Input) -> Save Button `onClick` -> Parse code -> `apiClient.saveMethod(...)` -> Bun API -> SQLite `son_classes`/`son_methods` (INSERT/UPDATE) -> API Response -> Update local state (feedback message). *Note: Does not update `$env` directly.*
+4.  **Browsing:** `ClassList` (Click) -> Update selected class state -> `MethodList` (`useEffect`) -> `apiClient.getMethods(selectedClass)` -> Bun API -> SQLite `son_methods` -> API Response -> Component State update. `MethodList` (Click) -> Update selected method state -> `CodeViewer` (`useEffect`) -> `apiClient.getMethodSource(...)` -> Bun API -> SQLite `son_methods` -> API Response -> Component State update.
+
+*   **State Management:** `SonEnvironmentContext` holds the primary `$env` object. Local `useState` in components manages UI state and data fetched for specific views.
+
+## 10. Stripe Integration
+
+*   **Not Applicable.**
+
+## 11. PostHog Analytics
+
+*   **Not Applicable.**
+
+## 12. Testing
+
+*   **Unit Tests (Vitest/Jest within Next.js client):**
+    *   **SON Interpreter (`interpreter.ts`):** Crucial. Test cases for *every* SON construct (literals, variables, all message send types, assignments, blocks, returns (local & non-local), cascades, sequences). Include tests for correct environment scoping (variable lookup, assignment). Test error conditions (MessageNotUnderstood, VariableNotFound).
+    *   **Environment (`environment.ts`):** Test `get`, `set`, `defineMethod`, `lookupMethod`, inheritance.
+    *   **`apiClient.ts`:** Mock `fetch` to test request formatting and response handling.
+*   **Integration Tests (Client-side):**
+    *   Test interaction between `Workspace`, `SonEnvironmentContext`, and `interpreter`. Ensure executing code updates results/console correctly.
+    *   Test interaction between `SystemBrowser` components and `apiClient` mocks. Ensure selecting classes/methods triggers correct API calls and updates UI.
+*   **E2E Tests (Playwright/Cypress):**
+    *   **Core Workflow:** Load page, type simple SON in Workspace, click Execute, verify result.
+    *   **Persistence:** Type `define:` in Workspace, click Save Method (mocking needed UI for class name), refresh page (or trigger reload), verify class/method appears in System Browser.
+    *   **Browsing:** Click a class, click a method, verify code appears.
+    *   **Error Handling:** Enter invalid SON/JSON, click Execute, verify error message. Execute code causing a SON runtime error (e.g., message not understood), verify error message.

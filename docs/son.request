@@ -1,0 +1,175 @@
+# Project Name
+SON Environment (Smalltalk Object Notation Environment)
+
+## Project Description
+A web application providing a Smalltalk-inspired development and execution environment based on a specific JSON representation of the language (SON - Smalltalk Object Notation). The system features a client-side SPA for user interaction (Workspace, System Browser) and a BunJS/SQLite backend for persisting the environment state (classes, methods), mimicking a Smalltalk image. The primary goal is to create a platform for developing AI agents, leveraging Smalltalk's message-passing paradigm and SON's code-as-data nature for agent logic, context awareness, and potential self-modification.
+
+## Target Audience
+Enthusiasts (like the requester) exploring alternative programming paradigms and novel approaches to AI agent development.
+
+## Desired Features
+
+### Core SON Execution Engine (Client-Side)
+- [ ] Implement a JavaScript-based execution engine strictly adhering to the specified SON JSON dialect.
+    - [ ] Support for all defined literals (numbers, strings, booleans, null).
+    - [ ] Support for symbols (`{"#": "symbol"}`).
+    - [ ] Support for variable access (`$x`) relative to the current environment (`$env`).
+    - [ ] Support for unary message sends.
+    - [ ] Support for binary message sends.
+    - [ ] Support for keyword message sends.
+    - [ ] Support for assignments (`["var:", expr]`).
+    - [ ] Support for method definitions (`["define:args:body:", ...]`).
+    - [ ] Support for block closures (`[["args"], "=>:", ["body..."]]`) with lexical scoping (capturing `$env`).
+    - [ ] Support for return statements (`["^", expr]`) with correct method/block semantics.
+    - [ ] Support for cascades (`["receiver", "cascade:", [...]]`).
+    - [ ] Support for sequences of statements.
+- [ ] Basic error handling during execution (e.g., message not understood, variable not found).
+- [ ] Provide a mechanism to define and manage the execution environment (`$env`), potentially loaded from/interacting with the persisted state.
+
+### SON IDE Interface (Client-Side SPA)
+- [ ] **Workspace:**
+    - [ ] Area for users to enter/edit SON JSON code snippets.
+    - [ ] Execute snippets using the client-side engine.
+    - [ ] Display execution results.
+    - [ ] Display console output (requires a SON equivalent for `Transcript show:`).
+    - [ ] Mechanism to save method definitions from the Workspace to the backend.
+- [ ] **System Browser (MVP):**
+    - [ ] List "classes" (or objects acting as classes) persisted in the backend.
+    - [ ] List methods associated with a selected "class".
+    - [ ] Display the SON JSON source code for a selected method.
+    - [ ] (Future) Allow editing methods directly in the browser.
+- [ ] **(Deferred) Inspector:** Interface to examine object states.
+
+### Persistence (Client-Backend Interaction)
+- [ ] Define a clear API between the SPA frontend and the BunJS backend.
+- [ ] **Backend (BunJS/SQLite):**
+    - [ ] Store SON "class" definitions (How are classes represented? Need convention).
+    - [ ] Store SON method definitions associated with classes.
+    - [ ] API endpoints to list classes.
+    - [ ] API endpoints to get methods for a class.
+    - [ ] API endpoints to get the SON JSON for a specific method.
+    - [ ] API endpoints to save/update method definitions.
+    - [ ] (Consideration) How is the global/base environment state managed and persisted?
+- [ ] **Frontend:**
+    - [ ] Fetch class/method data from the backend to populate the System Browser.
+    - [ ] Load necessary base environment/classes on startup.
+    - [ ] Send new/updated method definitions to the backend for persistence.
+
+### Application Capabilities (AI Agent Focus)
+- [ ] **JavaScript Interoperability:**
+    - [ ] Provide SON "wrapper classes/objects" with methods that invoke essential browser/JavaScript functionalities (e.g., `fetch` for HTTP requests, `setTimeout`, DOM manipulation basics if needed).
+- [ ] **Agent Communication:** Ensure the message-passing mechanism inherently supports communication between different object instances (representing agents).
+- [ ] **Code as Data:** The SON JSON format should be easily manipulable *within* the SON environment itself (e.g., an agent could potentially read/modify its own methods stored as JSON).
+
+## Design Requests
+- [ ] SPA Frontend (using a modern framework like React, Vue, Svelte, or plain JS).
+- [ ] BunJS/SQLite backend for persistence.
+- [ ] User interface inspired by Smalltalk environments (minimalist, functional).
+- [ ] Clear API definition for client-backend communication.
+
+## Other Notes
+- The project relies heavily on the custom SON JSON specification.
+- **Decision:** How are "classes" represented in SON? Is it just an object in `$env` holding methods, or a more structured approach? Need a convention for the System Browser and persistence.
+- **Decision:** How is the base environment (e.g., core methods on numbers, strings, collections, the `Transcript` equivalent) defined and loaded? Is it hardcoded, loaded from the DB?
+- **Decision:** How are changes synchronized between the client's execution environment and the backend's persisted state? Is saving explicit?
+- **Potential Challenge:** Implementing the non-local return semantics correctly within the JS execution engine.
+- **Potential Challenge:** Efficiently managing and potentially large amounts of SON JSON data for complex environments/agents.
+- **Potential Challenge:** Designing the backend API and database schema to effectively represent the SON environment structure.
+
+SON JSON specification
+{
+  "specification": {
+    "literals": {
+      "description": "Basic data types",
+      "types": ["numbers", "strings", "booleans", "null"]
+    },
+    "symbols": {
+      "format": {"#": "symbol"},
+      "example": {"#": "foo"},
+      "description": "Represents a Smalltalk symbol"
+    },
+    "variables": {
+      "format": "$x",
+      "implies": ["$env", "get:", "x"],
+      "description": "Accesses variable x from the current environment"
+    },
+    "message_sends": {
+      "unary": {
+        "format": ["receiver", "selector"],
+        "example": ["$x", "squared"]
+      },
+      "binary": {
+        "format": ["receiver", "operator", "argument"],
+        "example": [3, "+", 4]
+      },
+      "keyword": {
+        "format": ["receiver", "selector:with:etc:", "arg1", "arg2", "..."],
+        "example": ["$env", "at:put:", "x", 42]
+      }
+    },
+    "special_forms": {
+      "description": "Forms with implicit $env as receiver",
+      "assignments": {
+        "format": ["var:", "expr"],
+        "example": ["x:", 13],
+        "semantics": "Sets variable in $env"
+      },
+      "method_definitions": {
+        "format": ["define:args:body:", "selector", ["args"], ["body..."]],
+        "example": ["define:args:body:", "double:", ["x"], [["^", ["$x", "*", 2]]]],
+        "semantics": "Defines a method in $env"
+      }
+    },
+    "blocks": {
+      "format": [["args"], "=>:", ["body..."]],
+      "example": [["a"], "=>:", ["$a", "*", 2]],
+      "semantics": "Sends '=>:' to the array of argument names with the body, creating a block that captures the current $env",
+      "notes": [
+        "args is an array of strings representing argument names",
+        "body is an array of statements",
+        "The execution engine creates a closure with the args, body, and captured $env"
+      ]
+    },
+    "return_statement": {
+      "format": ["^", "expr"],
+      "example": ["^", 13],
+      "semantics": [
+        "In methods: Returns expr from the method",
+        "In blocks: Performs a non-local return to the method that defined the block with expr"
+      ],
+      "implicit_return": {
+        "methods": "Returns self if no explicit [^, expr]",
+        "blocks": "Returns the value of the last statement if no explicit [^, expr]"
+      }
+    },
+    "cascades": {
+      "format": ["receiver", "cascade:", ["msg1", "msg2", "..."]],
+      "example": ["$point", "cascade:", [["x:", 10], ["y:", 20]]]
+    },
+    "sequences": {
+      "format": ["stmt1", "stmt2", "..."],
+      "example": [["x:", 5], ["$x", "*", 2]]
+    }
+  },
+  "examples": [
+    {
+      "smalltalk": "[ :a | a * 2 ] value: 5",
+      "json": [[["a"], "=>:", ["$a", "*", 2]], "value:", 5],
+      "result": 10
+    },
+    {
+      "smalltalk": "double: x\n  ^ x * 2",
+      "json": ["define:args:body:", "double:", ["x"], [["^", ["$x", "*", 2]]]],
+      "usage": [["$self", "double:", 3]],
+      "result": 6
+    },
+    {
+      "smalltalk": "x := 3 + 4.\n[ :a | a := a + 1. a * 2 ] value: x",
+      "json": [
+        ["x:", [3, "+", 4]],
+        [[["a"], "=>:", [["a:", ["$a", "+", 1]], ["$a", "*", 2]]], "value:", "$x"]
+      ],
+      "result": 16
+    }
+  ]
+}
