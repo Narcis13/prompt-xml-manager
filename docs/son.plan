@@ -92,7 +92,7 @@ Okay, let's break down the development of the SON Environment application into a
 
 ## Phase 2: Frontend Foundation and Core Logic
 
--   [ ] **Step 6: Configure Next.js Client and Tailwind CSS**
+-   [x] **Step 6: Configure Next.js Client and Tailwind CSS**
     *   **Task**: Set up the basic Next.js application structure (`app/layout.tsx`, `app/page.tsx`). Ensure all components use `"use client"`. Configure Tailwind CSS (`tailwind.config.js`, `globals.css`). Create a basic root layout.
     *   **Files**:
         *   `son-environment/client/tailwind.config.js`: Configure Tailwind theme (colors, fonts) as per the design system notes (minimalist). Ensure `content` includes `./src/**/*.{js,ts,jsx,tsx,mdx}`.
@@ -102,13 +102,13 @@ Okay, let's break down the development of the SON Environment application into a
     *   **Step Dependencies**: Step 1.
     *   **User Instructions**: Run `bun install` in the `client` directory. Run `bun run dev` in `client` to verify setup.
 
--   [ ] **Step 7: Create Frontend API Client Service**
+-   [x] **Step 7: Create Frontend API Client Service**
     *   **Task**: Implement a typed service/library for making requests to the BunJS backend API endpoints defined in Phase 1. Use `fetch`. Define interfaces/types for API request bodies and response payloads.
     *   **Files**:
         *   `son-environment/client/src/lib/apiClient.ts`: Create async functions (`getBaseEnvironment`, `getClasses`, `getMethods`, `getMethodSource`, `saveMethod`). Use `fetch` to call the backend URLs. Handle JSON parsing, response status checking, and basic error handling (throwing errors on failure). Define associated TypeScript types/interfaces (e.g., `ClassListResponse`, `MethodListResponse`, `MethodSourceRequest`, `SaveMethodPayload`).
     *   **Step Dependencies**: Step 4, Step 5.
 
--   [ ] **Step 8: Implement Core SON Interpreter - Literals, Vars, Basic Messages**
+-   [x] **Step 8: Implement Core SON Interpreter - Literals, Vars, Basic Messages**
     *   **Task**: Create the basic structure for the SON interpreter. Implement the `evaluate` function handling literals (numbers, strings, booleans, null), symbols (`{"#": "symbol"}`), variable lookup (`$x`), sequences, and *basic* unary/binary message sends (initially assuming methods are simple JS functions attached to objects). Define basic error types.
     *   **Files**:
         *   `son-environment/client/src/lib/son/types.ts`: Define core types (`SonValue`, `SonObject`, `SonSymbol`, `SonEnvironment` structure).
@@ -118,7 +118,7 @@ Okay, let's break down the development of the SON Environment application into a
     *   **Step Dependencies**: Step 6.
     *   **User Instructions**: Add unit tests for the implemented interpreter features (requires a test runner setup - see Phase 5).
 
--   [ ] **Step 9: Set Up SON Environment State Management (React Context)**
+-   [x] **Step 9: Set Up SON Environment State Management (React Context)**
     *   **Task**: Create a React Context to manage the global SON execution environment (`$env`). Implement a provider that initializes the environment, potentially fetching the base environment via `apiClient`. Provide the environment object and functions to interact with it (e.g., reload).
     *   **Files**:
         *   `son-environment/client/src/contexts/SonEnvironmentContext.tsx`: Define the context (`SonEnvironmentContext`), create a provider component (`SonEnvironmentProvider`). The provider uses `useState` and `useEffect` to manage the `$env` object. Include a function `loadBaseEnvironment` that calls `apiClient.getBaseEnvironment()` and merges the result into the `$env` state.
@@ -128,7 +128,7 @@ Okay, let's break down the development of the SON Environment application into a
 
 ## Phase 3: Building the IDE Interface
 
--   [ ] **Step 10: Create IDE Main Layout Component**
+-   [x] **Step 10: Create IDE Main Layout Component**
     *   **Task**: Implement the main `IDE` component that structures the user interface into areas for the Workspace and System Browser using Tailwind CSS (Flexbox/Grid).
     *   **Files**:
         *   `son-environment/client/src/components/IDE.tsx`: Create the main layout component (`"use client"`). Use Flexbox or Grid to define the structure (e.g., a sidebar for the browser, main area for the workspace, or two main columns). Render placeholder divs for `Workspace` and `SystemBrowser`.

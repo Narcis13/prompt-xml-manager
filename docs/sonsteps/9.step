@@ -1,0 +1,318 @@
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/contexts/SonEnvironmentContext.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the React Context and Provider for managing the global SON execution environment ($env).
+ * It handles initializing the environment, fetching the base definitions from the backend API,
+ * and providing the environment instance, loading state, error state, and a reload function to consuming components.
+ * </ai_info>
+ *
+ * @file client/src/contexts/SonEnvironmentContext.tsx
+ * @description React Context for managing the SON execution environment ($env).
+ *
+ * Key features:
+ * - Creates a React Context (`SonEnvironmentContext`).
+ * - Defines the `SonEnvironmentProvider` component.
+ * - Manages the `ISonEnvironment` instance using `useState`.
+ * - Fetches the base environment from the API (`apiClient.getBaseEnvironment`) on mount using `useEffect`.
+ * - Handles loading and error states during the fetch process.
+ * - Provides a `reloadEnvironment` function to refetch the base environment.
+ * - Merges fetched base environment data into the root `SonEnvironment` instance.
+ *
+ * @dependencies
+ * - react: Core React hooks (`createContext`, `useContext`, `useState`, `useEffect`, `useCallback`).
+ * - ../lib/apiClient: Function to fetch the base environment (`getBaseEnvironment`) and related types.
+ * - ../lib/son/environment: The `SonEnvironment` class implementing `ISonEnvironment`.
+ * - ../lib/son/types: Core SON types (`ISonEnvironment`, `SonValue`).
+ *
+ * @notes
+ * - The initial `environment` state is null until the base environment is loaded.
+ * - Error handling during fetching is included.
+ * - The merging strategy for the base environment is currently a simple property assignment; this might need refinement based on the structure of the base environment data.
+ */
+"use client"; // Required for context and hooks
+
+import React, {
+	createContext,
+	useContext,
+	useState,
+	useEffect,
+	useCallback,
+	ReactNode,
+} from "react";
+import { getBaseEnvironment, BaseEnvironmentResponse, SonValue } from "@/lib/apiClient";
+import { SonEnvironment } from "@/lib/son/environment";
+import { ISonEnvironment } from "@/lib/son/types";
+
+/**
+ * Defines the shape of the value provided by the SonEnvironmentContext.
+ */
+interface SonEnvironmentContextType {
+	/** The root SON execution environment instance, or null if not yet loaded/initialized. */
+	environment: ISonEnvironment | null;
+	/** Indicates if the base environment is currently being loaded. */
+	isLoading: boolean;
+	/** Stores any error message that occurred during environment loading. */
+	error: string | null;
+	/** Function to trigger a reload of the base environment from the API. */
+	reloadEnvironment: () => void;
+}
+
+/**
+ * React Context object for the SON environment.
+ */
+const SonEnvironmentContext = createContext<SonEnvironmentContextType | undefined>(
+	undefined
+);
+
+/**
+ * Props for the SonEnvironmentProvider component.
+ */
+interface SonEnvironmentProviderProps {
+	children: ReactNode;
+}
+
+/**
+ * Merges the fetched base environment data into a SonEnvironment instance.
+ * Currently performs a shallow merge, assigning top-level keys from the fetched
+ * data directly onto the environment's internal storage.
+ *
+ * @param env The SonEnvironment instance to merge into.
+ * @param baseData The fetched base environment data.
+ */
+const mergeBaseEnvironment = (env: ISonEnvironment, baseData: BaseEnvironmentResponse) => {
+    console.log("Merging base environment data:", baseData);
+    // Simple shallow merge: Assign each top-level key from baseData to the environment.
+    // This assumes baseData is a flat object where keys are variable names
+    // and values are the corresponding SonValue to store.
+    // More complex merging might be needed if baseData contains nested structures
+    // or requires specific instantiation logic.
+    for (const key in baseData) {
+        if (Object.prototype.hasOwnProperty.call(baseData, key)) {
+            // Directly set the value in the environment's root scope.
+            // TODO: Consider if values need transformation or special handling (e.g., creating class instances).
+            env.set(key, baseData[key] as SonValue);
+        }
+    }
+    console.log("Environment after merge:", env); // Check the state after merge
+};
+
+
+/**
+ * Provides the SON execution environment state to its children components.
+ * Fetches the base environment on initial mount.
+ *
+ * @param {SonEnvironmentProviderProps} props - The component props.
+ * @returns {JSX.Element} The provider component wrapping its children.
+ */
+export function SonEnvironmentProvider({ children }: SonEnvironmentProviderProps): JSX.Element {
+	const [environment, setEnvironment] = useState<ISonEnvironment | null>(null);
+	const [isLoading, setIsLoading] = useState<boolean>(true); // Start loading initially
+	const [error, setError] = useState<string | null>(null);
+
+	/**
+	 * Loads the base environment from the backend API and initializes the environment state.
+	 * Uses `useCallback` to memoize the function for stability.
+	 */
+	const loadBaseEnvironment = useCallback(async () => {
+		console.log("Attempting to load base environment...");
+		setIsLoading(true);
+		setError(null);
+		setEnvironment(null); // Reset environment while loading
+
+		try {
+			// Fetch the base environment JSON object from the API
+			const baseEnvData = await getBaseEnvironment();
+
+			// Create the root environment instance
+            // For now, the root environment has no parent.
+			const rootEnv = new SonEnvironment(null);
+
+			// Merge the fetched data into the root environment
+			mergeBaseEnvironment(rootEnv, baseEnvData);
+
+			// Set the initialized environment state
+			setEnvironment(rootEnv);
+			console.log("Base environment loaded and set successfully.");
+
+		} catch (err: any) {
+			console.error("Failed to load base environment:", err);
+			setError(err.message || "An unknown error occurred while loading the environment.");
+            setEnvironment(null); // Ensure environment is null on error
+		} finally {
+			setIsLoading(false);
+            console.log("Finished loading base environment (success or failure).");
+		}
+	}, []); // No dependencies, should only run once unless explicitly called by reload
+
+	/**
+	 * Reloads the base environment by calling `loadBaseEnvironment`.
+	 */
+	const reloadEnvironment = useCallback(() => {
+        console.log("Reload environment triggered.");
+		loadBaseEnvironment();
+	}, [loadBaseEnvironment]); // Depends on the memoized load function
+
+	// Load the base environment when the provider mounts
+	useEffect(() => {
+        console.log("SonEnvironmentProvider mounted, initiating base environment load.");
+		loadBaseEnvironment();
+	}, [loadBaseEnvironment]); // Run effect when loadBaseEnvironment function identity changes (should be stable)
+
+
+	// Prepare the context value
+	const contextValue: SonEnvironmentContextType = {
+		environment,
+		isLoading,
+		error,
+		reloadEnvironment,
+	};
+
+	return (
+		<SonEnvironmentContext.Provider value={contextValue}>
+			{children}
+		</SonEnvironmentContext.Provider>
+	);
+}
+
+export { SonEnvironmentContext }; // Export context for direct use if needed
+```]]></file_code>
+    </file>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/hooks/useSonEnvironment.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines a custom React hook `useSonEnvironment` for conveniently accessing
+ * the SON environment context (`SonEnvironmentContext`). It simplifies component logic
+ * by providing direct access to the context value and includes an error check to ensure
+ * it's used within a `SonEnvironmentProvider`.
+ * </ai_info>
+ *
+ * @file client/src/hooks/useSonEnvironment.ts
+ * @description Custom hook to access the SonEnvironmentContext.
+ *
+ * @dependencies
+ * - react: `useContext`.
+ * - ../contexts/SonEnvironmentContext: The context object to consume.
+ *
+ * @notes
+ * - Provides a cleaner way for components to get the environment state compared to `useContext(SonEnvironmentContext)` directly.
+ * - Throws an error if used outside of a `SonEnvironmentProvider`.
+ */
+"use client"; // Required for hooks
+
+import { useContext } from "react";
+import { SonEnvironmentContext } from "@/contexts/SonEnvironmentContext";
+
+/**
+ * Custom hook to access the SON environment context.
+ * Provides the environment instance, loading state, error state, and reload function.
+ *
+ * @returns The value provided by `SonEnvironmentContext`.
+ * @throws {Error} If the hook is used outside of a `SonEnvironmentProvider`.
+ */
+export const useSonEnvironment = () => {
+	const context = useContext(SonEnvironmentContext);
+
+	if (context === undefined) {
+		throw new Error("useSonEnvironment must be used within a SonEnvironmentProvider");
+	}
+
+	return context;
+};
+```]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/app/layout.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the root layout for the Next.js application.
+ * It sets up the HTML structure, includes global styles and fonts, and applies the
+ * Geist font variables. It now also wraps the application content (`children`)
+ * with the `SonEnvironmentProvider` to make the SON execution environment context
+ * available throughout the application.
+ * </ai_info>
+ *
+ * @file client/src/app/layout.tsx
+ * @description Root layout component for the Next.js application, including the SON environment provider.
+ *
+ * @dependencies
+ * - next/font/google: For loading Geist Sans and Mono fonts.
+ * - ./globals.css: Global application styles (including Tailwind directives).
+ * - ../contexts/SonEnvironmentContext: The provider component for the SON environment.
+ *
+ * @notes
+ * - All pages/components within this layout will have access to the `useSonEnvironment` hook.
+ * - The layout itself is marked "use client" because the Provider uses client-side hooks (`useState`, `useEffect`).
+ */
+"use client"; // Provider uses client hooks, so layout must be client component
+
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import { SonEnvironmentProvider } from "@/contexts/SonEnvironmentContext"; // Import the provider
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+
+/**
+ * Root layout component for the SON Environment application.
+ * Sets up HTML structure, fonts, global styles, and wraps children
+ * with the SonEnvironmentProvider.
+ *
+ * @param {Readonly<{ children: React.ReactNode }>} props - Component props containing child elements.
+ * @returns {JSX.Element} The root layout structure.
+ */
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>): React.ReactNode { // Return type explicitly set to React.ReactNode for clarity
+  return (
+    <html lang="en">
+      <body
+        // Apply font variables and base Tailwind antialiasing
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}
+      >
+        {/* Wrap the entire application content with the environment provider */}
+        <SonEnvironmentProvider>
+          {/* Main content area, allow it to grow */}
+          <main className="flex-grow flex flex-col">
+            {children}
+          </main>
+        </SonEnvironmentProvider>
+      </body>
+    </html>
+  );
+}
+```]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>
+
+***
+**STEP 9 COMPLETE**. Here's what I did and why:
+1.  **`client/src/contexts/SonEnvironmentContext.tsx` (CREATE):** Created the context and provider. The provider now manages the `ISonEnvironment` state, fetches base definitions using `apiClient.getBaseEnvironment` on mount, handles loading/error states, and provides a `reloadEnvironment` function. A basic `mergeBaseEnvironment` function was included to populate the environment from fetched data (assuming a simple key-value structure for now). Added extensive documentation.
+2.  **`client/src/hooks/useSonEnvironment.ts` (CREATE):** Created a standard custom hook to simplify accessing the context value in components and provide a helpful error message if used incorrectly.
+3.  **`client/src/app/layout.tsx` (UPDATE):** Wrapped the application's `children` with the `<SonEnvironmentProvider>`. Added `flex flex-col` and `min-h-screen` to `<body>` and `flex-grow` to `<main>` for better layout structure, anticipating the IDE filling the screen. Marked the layout as `"use client"` since the provider requires it.
+
+**USER INSTRUCTIONS:** Please do the following:
+1.  **Seed the Base Environment:** Add some initial data to the `son_base_environment` table in `server/data/son_environment.sqlite` so the `getBaseEnvironment` API endpoint returns data. You can use a tool like DB Browser for SQLite or add seeding logic to `server/db.ts`. Example entries:
+    *   `key`: "Transcript", `value_json`: `'{"#": "Transcript", "methods": { "show:": {"args": ["anObject"], "body": [["JSBridge", "log:", "$anObject"]]} } }'` (Requires `JSBridge` logic later)
+    *   `key`: "Number", `value_json`: `'{"#": "Number", "methods": { "+": {"args": ["aNumber"], "body": [["^", ["self", "jsAdd:", "$aNumber"]]]} } }'` (Requires JS bridge or primitive handling later)
+    *   **Note:** The exact structure of `value_json` will depend on how the interpreter expects to find and execute methods. The examples above are conceptual. For now, even simple key-value pairs like `key: "MyVar", value_json: '"hello"'` would work for testing the loading mechanism.
+2.  **Run Servers:** Make sure both the backend (`cd server && bun run dev`) and frontend (`cd client && bun run dev`) servers are running.
+3.  **Check Console:** Open the browser's developer console when viewing the client application. You should see logs indicating the attempt to load the base environment, success or failure messages, and potentially the merged environment data if logging is enabled in the context provider.
