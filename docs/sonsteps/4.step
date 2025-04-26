@@ -1,0 +1,493 @@
+Okay, I will implement Step 4: Implement Backend Read API Endpoints.
+This involves creating handler files for API logic and updating the main server file to route requests to these handlers. I'll also add basic CORS headers to allow the frontend (running on a different port) to communicate with this server.
+Here's what I did and why:
+CREATE server/api/environmentHandlers.ts: Created this file to hold the logic for handling requests related to the base SON environment. Implemented the getBaseEnvironment function which fetches all entries from son_base_environment, parses the value_json for each entry, and aggregates them into a single object. This follows the specification for the /api/base-environment endpoint. Added error handling for database queries and JSON parsing.
+CREATE server/api/persistenceHandlers.ts: Created this file to hold the logic for handling requests related to persisted classes and methods.
+Implemented getClasses: Fetches all class names from son_classes and returns them in the specified JSON format.
+Implemented getMethods: Fetches method selectors for a specific class name by joining son_classes and son_methods. Handles the case where the class is not found (404).
+Implemented getMethodSource: Fetches the arguments and body for a specific method of a class. Parses the stored JSON strings (arguments_json, body_json). Handles cases where the class or method is not found (404) and potential JSON parsing errors (500).
+UPDATE server/server.ts:
+Imported the handler functions from the newly created files.
+Added CORS headers (Access-Control-Allow-Origin, Access-Control-Allow-Methods, Access-Control-Allow-Headers) to allow cross-origin requests from http://localhost:3000 (the expected origin for the Next.js client).
+Implemented handling for OPTIONS preflight requests required by CORS.
+Added routing logic within the fetch handler to match GET requests for /api/base-environment, /api/classes, /api/methods/{className}, and /api/method/{className}/{selector}.
+Extracted URL parameters (className, selector) using regular expressions for robust matching.
+Called the appropriate handler functions, passing the db instance and parameters.
+Wrapped handler calls in try...catch blocks to handle potential errors gracefully and return appropriate HTTP status codes (200, 404, 500).
+Ensured responses include CORS headers.
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>server/api/environmentHandlers.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * @file server/api/environmentHandlers.ts
+ * @description API request handlers related to the SON base environment.
+ *
+ * @dependencies
+ * - bun:sqlite: Database type definitions.
+ * - ../db: The database instance.
+ *
+ * @notes
+ * - Handles fetching and formatting the base environment definitions stored in the database.
+ */
+
+import type { Database } from "bun:sqlite";
+
+/**
+ * Handles GET /api/base-environment requests.
+ * Fetches all entries from the son_base_environment table, parses the JSON values,
+ * and returns them as a single merged JSON object.
+ *
+ * @param db The Bun SQLite database instance.
+ * @returns A Promise resolving to a Response object.
+ *          - 200 OK: With JSON body containing the merged base environment.
+ *          - 500 Internal Server Error: If database query or JSON parsing fails.
+ */
+export async function getBaseEnvironment(db: Database): Promise<Response> {
+	console.log("Handling GET /api/base-environment");
+	try {
+		const query = db.query("SELECT key, value_json FROM son_base_environment;");
+		const results = query.all() as { key: string; value_json: string }[];
+
+		const baseEnvironment = results.reduce((acc, row) => {
+			try {
+				acc[row.key] = JSON.parse(row.value_json);
+			} catch (parseError) {
+				console.error(`Failed to parse JSON for base environment key "${row.key}":`, parseError);
+				// Decide how to handle parse errors: skip the key, throw, return error response?
+				// For now, we'll throw to indicate a server configuration issue.
+				throw new Error(`Invalid JSON in database for key: ${row.key}`);
+			}
+			return acc;
+		}, {} as Record<string, any>);
+
+		return new Response(JSON.stringify(baseEnvironment), {
+			headers: { "Content-Type": "application/json" },
+			status: 200,
+		});
+	} catch (error: any) {
+		console.error("Error fetching base environment:", error);
+		return new Response(JSON.stringify({ error: "Failed to fetch base environment", details: error.message }), {
+			headers: { "Content-Type": "application/json" },
+			status: 500,
+		});
+	}
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>server/api/persistenceHandlers.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * @file server/api/persistenceHandlers.ts
+ * @description API request handlers related to SON class and method persistence.
+ *
+ * @dependencies
+ * - bun:sqlite: Database type definitions.
+ * - ../db: The database instance.
+ *
+ * @notes
+ * - Handles fetching class lists, method lists for a class, and source code for specific methods.
+ * - Includes error handling for not found resources (404) and server errors (500).
+ */
+
+import type { Database } from "bun:sqlite";
+
+// Types for method source response to align with specification
+type SonValue = any; // Replace with more specific types if available from client later
+interface MethodSourceResponse {
+	selector: string;
+	arguments: SonValue[];
+	body: SonValue[];
+}
+
+/**
+ * Handles GET /api/classes requests.
+ * Fetches a list of all class names from the son_classes table.
+ *
+ * @param db The Bun SQLite database instance.
+ * @returns A Promise resolving to a Response object.
+ *          - 200 OK: With JSON body {"classes": ["ClassName1", ...]}
+ *          - 500 Internal Server Error: If the database query fails.
+ */
+export async function getClasses(db: Database): Promise<Response> {
+	console.log("Handling GET /api/classes");
+	try {
+		const query = db.query("SELECT name FROM son_classes ORDER BY name;");
+		const results = query.all() as { name: string }[];
+		const classNames = results.map(row => row.name);
+
+		return new Response(JSON.stringify({ classes: classNames }), {
+			headers: { "Content-Type": "application/json" },
+			status: 200,
+		});
+	} catch (error: any) {
+		console.error("Error fetching classes:", error);
+		return new Response(JSON.stringify({ error: "Failed to fetch classes", details: error.message }), {
+			headers: { "Content-Type": "application/json" },
+			status: 500,
+		});
+	}
+}
+
+/**
+ * Handles GET /api/methods/{className} requests.
+ * Fetches a list of method selectors for a given class name.
+ *
+ * @param db The Bun SQLite database instance.
+ * @param className The name of the class to fetch methods for.
+ * @returns A Promise resolving to a Response object.
+ *          - 200 OK: With JSON body {"methods": ["selector1", ...]}
+ *          - 404 Not Found: If the specified class name does not exist.
+ *          - 500 Internal Server Error: If the database query fails.
+ */
+export async function getMethods(db: Database, className: string): Promise<Response> {
+	console.log(`Handling GET /api/methods/${className}`);
+	try {
+		// First, check if the class exists
+		const classQuery = db.query("SELECT id FROM son_classes WHERE name = ?;");
+		const classResult = classQuery.get(className) as { id: string } | null;
+
+		if (!classResult) {
+			return new Response(JSON.stringify({ error: `Class not found: ${className}` }), {
+				headers: { "Content-Type": "application/json" },
+				status: 404,
+			});
+		}
+
+		const classId = classResult.id;
+
+		// Fetch method selectors for the class
+		const methodsQuery = db.query("SELECT selector FROM son_methods WHERE class_id = ? ORDER BY selector;");
+		const methodsResults = methodsQuery.all(classId) as { selector: string }[];
+		const methodSelectors = methodsResults.map(row => row.selector);
+
+		return new Response(JSON.stringify({ methods: methodSelectors }), {
+			headers: { "Content-Type": "application/json" },
+			status: 200,
+		});
+
+	} catch (error: any) {
+		console.error(`Error fetching methods for class "${className}":`, error);
+		return new Response(JSON.stringify({ error: "Failed to fetch methods", details: error.message }), {
+			headers: { "Content-Type": "application/json" },
+			status: 500,
+		});
+	}
+}
+
+/**
+ * Handles GET /api/method/{className}/{selector} requests.
+ * Fetches the source code (arguments and body JSON) for a specific method of a class.
+ *
+ * @param db The Bun SQLite database instance.
+ * @param className The name of the class.
+ * @param selector The method selector.
+ * @returns A Promise resolving to a Response object.
+ *          - 200 OK: With JSON body {"selector": "...", "arguments": [...], "body": [...]}
+ *          - 404 Not Found: If the class or method does not exist.
+ *          - 500 Internal Server Error: If the database query or JSON parsing fails.
+ */
+export async function getMethodSource(db: Database, className: string, selector: string): Promise<Response> {
+	console.log(`Handling GET /api/method/${className}/${selector}`);
+	try {
+		const query = db.query(`
+      SELECT m.selector, m.arguments_json, m.body_json
+      FROM son_methods m
+      JOIN son_classes c ON m.class_id = c.id
+      WHERE c.name = ? AND m.selector = ?;
+    `);
+		const result = query.get(className, selector) as { selector: string; arguments_json: string; body_json: string } | null;
+
+		if (!result) {
+			// Check if the class exists at all to give a more specific error
+			const classQuery = db.query("SELECT id FROM son_classes WHERE name = ?;");
+			const classExists = classQuery.get(className);
+			if (!classExists) {
+				return new Response(JSON.stringify({ error: `Class not found: ${className}` }), {
+					headers: { "Content-Type": "application/json" },
+					status: 404,
+				});
+			} else {
+				return new Response(JSON.stringify({ error: `Method not found: ${selector} in class ${className}` }), {
+					headers: { "Content-Type": "application/json" },
+					status: 404,
+				});
+			}
+		}
+
+		// Parse the JSON strings for arguments and body
+		let args: SonValue[];
+		let body: SonValue[];
+		try {
+			args = JSON.parse(result.arguments_json);
+		} catch (e) {
+			throw new Error(`Invalid arguments JSON in database for ${className}>>${selector}: ${e.message}`);
+		}
+		try {
+			body = JSON.parse(result.body_json);
+		} catch (e) {
+			throw new Error(`Invalid body JSON in database for ${className}>>${selector}: ${e.message}`);
+		}
+
+
+		const responsePayload: MethodSourceResponse = {
+			selector: result.selector,
+			arguments: args,
+			body: body,
+		};
+
+		return new Response(JSON.stringify(responsePayload), {
+			headers: { "Content-Type": "application/json" },
+			status: 200,
+		});
+
+	} catch (error: any) {
+		console.error(`Error fetching method source for "${className} >> ${selector}":`, error);
+		// Differentiate between JSON parse error (likely 500) and others
+		const status = error.message.includes("Invalid") ? 500 : 500; // Default to 500
+		return new Response(JSON.stringify({ error: "Failed to fetch method source", details: error.message }), {
+			headers: { "Content-Type": "application/json" },
+			status: status,
+		});
+	}
+}
+
+
+// Placeholder for the Write API (Step 5)
+// export async function saveMethod(db: Database, data: any): Promise<Response> {
+//   // Implementation will go here in the next step
+//   return new Response(JSON.stringify({ message: "Save method endpoint not implemented yet" }), { status: 501 });
+// }
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>server/server.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * @file server/server.ts
+ * @description Main entry point for the SON Environment BunJS backend server.
+ *              Sets up an HTTP server with basic routing and WebSocket support.
+ *              Includes routing for API endpoints to handle SON environment persistence.
+ *
+ * @dependencies
+ * - bun: Provides the Bun runtime APIs, including Bun.serve and WebSocket types.
+ * - ./db: Imports the initialized SQLite database instance.
+ * - ./api/environmentHandlers: Handlers for base environment API requests.
+ * - ./api/persistenceHandlers: Handlers for class/method persistence API requests.
+ *
+ * @notes
+ * - This server provides the API endpoints for the Next.js client application.
+ * - Routing is handled manually based on the URL pathname and HTTP method.
+ * - WebSocket support is included but handlers are minimal (logging only) for MVP.
+ * - CORS headers are added to allow requests from the client development server.
+ */
+
+import { db } from "./db"; // Import the initialized database instance
+import { getBaseEnvironment } from "./api/environmentHandlers";
+import { getClasses, getMethods, getMethodSource } from "./api/persistenceHandlers";
+import type { ServerWebSocket, WebSocketHandler } from "bun";
+
+const PORT = process.env.PORT ?? 3013; // Use PORT from env or default to 3013
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? "http://localhost:3000"; // Expected client origin
+
+console.log(`Starting SON Environment backend server on port ${PORT}...`);
+console.log(`Allowing CORS requests from: ${CLIENT_ORIGIN}`);
+
+// CORS Headers - Adjust origin as needed for production
+const corsHeaders = {
+	"Access-Control-Allow-Origin": CLIENT_ORIGIN, // Allow requests from the client's origin
+	"Access-Control-Allow-Methods": "GET, POST, OPTIONS", // Allowed HTTP methods
+	"Access-Control-Allow-Headers": "Content-Type, Authorization", // Allowed headers
+	"Access-Control-Allow-Credentials": "true", // If you need to handle credentials/cookies
+};
+
+
+// Define WebSocket behavior (minimal for now)
+const wsHandler: WebSocketHandler<{ authToken: string }> = {
+	open(ws: ServerWebSocket<{ authToken: string }>) {
+		console.log(`WebSocket connection opened: ${ws.remoteAddress}`);
+	},
+	message(ws: ServerWebSocket<{ authToken: string }>, message: string | BufferSource) {
+		console.log(`Received message from ${ws.remoteAddress}:`, message);
+	},
+	close(ws: ServerWebSocket<{ authToken: string }>, code: number, reason?: string) {
+		console.log(`WebSocket connection closed: ${ws.remoteAddress}, Code: ${code}, Reason: ${reason}`);
+	},
+	drain(ws: ServerWebSocket<{ authToken: string }>) {
+		console.log(`WebSocket connection drained: ${ws.remoteAddress}`);
+	},
+};
+
+
+// Start the Bun server
+const server = Bun.serve<{ authToken: string }>({
+	port: PORT,
+	/**
+	 * Handles incoming HTTP requests.
+	 * @param req The incoming request object.
+	 * @param server The Bun server instance.
+	 * @returns A Promise resolving to a Response object or undefined (for WebSocket upgrade).
+	 */
+	async fetch(req: Request, server) {
+		const url = new URL(req.url);
+		const pathname = url.pathname;
+
+		console.log(`[${new Date().toISOString()}] ${req.method} ${pathname}`);
+
+        // Handle CORS preflight requests (OPTIONS)
+        if (req.method === "OPTIONS") {
+            console.log("Handling OPTIONS preflight request");
+            return new Response(null, {
+                status: 204, // No Content
+                headers: corsHeaders,
+            });
+        }
+
+		// Handle WebSocket upgrade requests
+		if (pathname === "/ws") {
+            // Allow upgrade only from expected origin if needed
+            // const origin = req.headers.get("origin");
+            // if (origin !== CLIENT_ORIGIN) {
+            //     console.warn(`WebSocket upgrade rejected from origin: ${origin}`);
+            //     return new Response("Forbidden", { status: 403, headers: corsHeaders });
+            // }
+
+			const userData = { authToken: "user_" + Math.random().toString(16).slice(2) };
+			const success = server.upgrade(req, {
+				data: userData,
+			});
+			if (success) {
+				console.log(`WebSocket upgrade successful for ${req.headers.get("sec-websocket-key")}`);
+				// Note: Bun automatically handles the response for successful upgrades.
+                // We don't return a Response here. CORS headers are not typically needed for the upgrade itself,
+                // but the WS connection should respect origin policies if implemented.
+				return;
+			} else {
+				console.error(`WebSocket upgrade failed for ${req.headers.get("sec-websocket-key")}`);
+				// Send CORS headers even on failure
+				return new Response("WebSocket upgrade failed", { status: 400, headers: corsHeaders });
+			}
+		}
+
+		// Basic HTTP Routing
+		if (pathname === "/") {
+			return new Response("SON Environment Server is running!", {
+				headers: { "Content-Type": "text/plain", ...corsHeaders },
+			});
+		}
+
+		// API Route Handling
+		try {
+			if (pathname.startsWith("/api/")) {
+				// --- READ Endpoints ---
+				if (req.method === "GET") {
+					if (pathname === '/api/base-environment') {
+						const response = await getBaseEnvironment(db);
+						response.headers.set("Access-Control-Allow-Origin", CLIENT_ORIGIN); // Ensure CORS on actual response
+						return response;
+					}
+					if (pathname === '/api/classes') {
+						const response = await getClasses(db);
+						response.headers.set("Access-Control-Allow-Origin", CLIENT_ORIGIN);
+						return response;
+					}
+
+					// Match /api/methods/{className}
+					const methodsMatch = pathname.match(/^\/api\/methods\/([^\/]+)$/);
+					if (methodsMatch) {
+						const className = decodeURIComponent(methodsMatch[1]);
+						const response = await getMethods(db, className);
+						response.headers.set("Access-Control-Allow-Origin", CLIENT_ORIGIN);
+						return response;
+					}
+
+					// Match /api/method/{className}/{selector}
+					// Selector can contain colons, so match greedily until the end
+					const methodSourceMatch = pathname.match(/^\/api\/method\/([^\/]+)\/(.+)$/);
+					if (methodSourceMatch) {
+						const className = decodeURIComponent(methodSourceMatch[1]);
+						const selector = decodeURIComponent(methodSourceMatch[2]);
+						const response = await getMethodSource(db, className, selector);
+						response.headers.set("Access-Control-Allow-Origin", CLIENT_ORIGIN);
+						return response;
+					}
+				}
+
+				// --- WRITE Endpoints (Placeholder for Step 5) ---
+				// if (req.method === 'POST' && pathname === '/api/method') {
+				//    // const data = await req.json();
+				//    // const response = await saveMethod(db, data);
+				//    // response.headers.set("Access-Control-Allow-Origin", CLIENT_ORIGIN);
+                    // // return response;
+				// }
+
+				// If no API route matched
+				console.log(`API route not found: ${req.method} ${pathname}`);
+				return new Response(JSON.stringify({ error: "API route not found" }), {
+					status: 404,
+					headers: { "Content-Type": "application/json", ...corsHeaders },
+				});
+			}
+		} catch (error: any) {
+			// Catch unexpected errors during handler execution
+			console.error(`Error processing request ${req.method} ${pathname}:`, error);
+			return new Response(JSON.stringify({ error: "Internal Server Error", details: error.message }), {
+				status: 500,
+				headers: { "Content-Type": "application/json", ...corsHeaders },
+			});
+		}
+
+
+		// Default 404 Not Found response if no route matched
+		console.log(`Route not found: ${req.method} ${pathname}`);
+		return new Response("Not Found", { status: 404, headers: corsHeaders });
+	},
+
+	// Attach the WebSocket handler configuration
+	websocket: wsHandler,
+
+	/**
+	 * Handles errors during request processing *before* the fetch handler runs or general server errors.
+	 * @param error The error object.
+	 * @returns A Response object indicating an internal server error.
+	 */
+	error(error: Error) {
+		console.error("Server error:", error);
+		// Add CORS headers to error responses too
+		return new Response("Internal Server Error", { status: 500, headers: corsHeaders });
+	},
+});
+
+console.log(`SON Environment server listening on http://${server.hostname}:${server.port}`);
+
+// Example: Log database path on startup
+try {
+    const result = db.query("PRAGMA database_list;").get();
+    // @ts-expect-error - result might be unknown type, but structure is known for PRAGMA
+    console.log(`Database file: ${result?.file ?? 'N/A'}`);
+} catch (e) {
+    console.error("Could not query database path:", e);
+}
+]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>
+Use code with caution.
+Xml
+STEP 4 COMPLETE. Here's what I did and why:
+I created two new files, server/api/environmentHandlers.ts and server/api/persistenceHandlers.ts, to house the logic for handling specific API requests related to the base environment and class/method persistence, respectively. This improves code organization by separating API logic from the main server setup. I implemented the getBaseEnvironment, getClasses, getMethods, and getMethodSource functions within these files as specified, including database interactions and JSON parsing/formatting.
+I updated server/server.ts to import these handler functions and added routing logic within the fetch method to direct incoming GET requests for /api/base-environment, /api/classes, /api/methods/{className}, and /api/method/{className}/{selector} to the appropriate handlers. I included URL parameter parsing and robust error handling for both expected (404 Not Found) and unexpected (500 Internal Server Error) issues. Crucially, I added CORS header handling (including OPTIONS preflight requests) to allow the Next.js client application (running on http://localhost:3000) to communicate with this backend server (running on http://localhost:3013).
+USER INSTRUCTIONS: Please do the following:
+Restart the server: If the server is running with --watch (bun run dev), it should restart automatically. Otherwise, stop and restart the server (bun run dev or bun run start in the server directory).
+Test the Endpoints (Optional but Recommended):
+You can use curl or a tool like Postman/Insomnia to test the new endpoints:
+curl http://localhost:3013/api/base-environment
+curl http://localhost:3013/api/classes
+curl http://localhost:3013/api/methods/YourClassName (Replace YourClassName with a class name if you add test data).
+curl http://localhost:3013/api/method/YourClassName/your:selector: (Replace with actual class/selector if you add test data).
+Note: These endpoints will likely return empty results initially unless you manually add data to the son_environment.sqlite database file (e.g., using DB Browser for SQLite). You need entries in son_classes, son_methods, and son_base_environment for the endpoints to return data. Step 20 will involve seeding the base environment data.

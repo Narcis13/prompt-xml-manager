@@ -60,21 +60,21 @@ Okay, let's break down the development of the SON Environment application into a
         3.  Inside `son-environment`, create the `server` directory.
         4.  Inside `son-environment/server`, run `bun init -y`. Edit `package.json` as described above. Run `bun add bun-types --dev`. Create `tsconfig.json`.
 
--   [ ] **Step 2: Setup SQLite Database and Schema**
+-   [x] **Step 2: Setup SQLite Database and Schema**
     *   **Task**: Create the database initialization script in the Bun backend. Define the SQLite schema for `son_classes`, `son_methods`, and `son_base_environment` as specified in the technical specification. Ensure the database file is created if it doesn't exist.
     *   **Files**:
         *   `son-environment/server/db.ts`: Implement database connection logic using `bun:sqlite`. Include functions/statements to create the tables (`son_classes`, `son_methods`, `son_base_environment`) with specified columns, types, constraints, and indexes. Export the `db` instance. Create a directory `data` if needed.
     *   **Step Dependencies**: Step 1.
     *   **User Instructions**: Run `bun install` in the `server` directory if not already done.
 
--   [ ] **Step 3: Implement Basic Bun Server and API Routing**
+-   [x] **Step 3: Implement Basic Bun Server and API Routing**
     *   **Task**: Adapt the starter `server.js` (renaming to `server.ts`). Set up the main Bun server using `Bun.serve`. Define basic routing structure for API endpoints (`/api/...`). Remove agent/message/file logic from the starter template. Keep WebSocket setup but make handlers minimal (connect/disconnect logging). Add basic root/not-found handling.
     *   **Files**:
         *   `son-environment/server/server.ts`: Initialize the server, import `db` from `db.ts`. Set up basic request handling using `URL` and `req.method`. Add stubs for API routes. Implement minimal WebSocket handlers (`open`, `close`, `message`). Log server start.
     *   **Step Dependencies**: Step 1, Step 2.
     *   **User Instructions**: Ensure `bun:sqlite` is available (comes with Bun).
 
--   [ ] **Step 4: Implement Backend Read API Endpoints**
+-   [x] **Step 4: Implement Backend Read API Endpoints**
     *   **Task**: Implement the GET API endpoints for reading data: `/api/base-environment`, `/api/classes`, `/api/methods/{className}`, `/api/method/{className}/{selector}`. Fetch data from the SQLite database using handlers.
     *   **Files**:
         *   `son-environment/server/api/environmentHandlers.ts`: Create handler function `getBaseEnvironment(db)` to fetch and format data from `son_base_environment`.
@@ -83,7 +83,7 @@ Okay, let's break down the development of the SON Environment application into a
     *   **Step Dependencies**: Step 2, Step 3.
     *   **User Instructions**: Can manually add some test data to `son_environment.sqlite` using a tool like DB Browser for SQLite to test the endpoints.
 
--   [ ] **Step 5: Implement Backend Write API Endpoint**
+-   [x] **Step 5: Implement Backend Write API Endpoint**
     *   **Task**: Implement the POST API endpoint `/api/method` to save or update method definitions. Handle class creation if it doesn't exist. Validate input data.
     *   **Files**:
         *   `son-environment/server/api/persistenceHandlers.ts`: Add handler function `saveMethod(db, data)` which takes the parsed request body. Implement the logic to find/create the class ID and insert/update the method in `son_methods`, storing arguments and body as JSON strings. Use transactions for safety.

@@ -1,0 +1,587 @@
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>server/api/persistenceHandlers.ts</file_path>
+      <file_code><![CDATA[/**
+ * @file server/api/persistenceHandlers.ts
+ * @description API request handlers related to SON class and method persistence.
+ * Provides functions to fetch class/method data and save new/updated methods.
+ * 
+ * Key features:
+ * - Fetches list of all class names.
+ * - Fetches list of method selectors for a specific class.
+ * - Fetches the source code (arguments, body) for a specific method.
+ * - Saves or updates a method definition, creating the class if it doesn't exist.
+ * 
+ * @dependencies
+ * - bun:sqlite: Database type definitions.
+ * - node:crypto: For generating UUIDs.
+ * - ../db: The database instance.
+ * 
+ * @notes
+ * - Handles fetching class lists, method lists for a class, and source code for specific methods.
+ * - Handles saving/updating methods via POST request.
+ * - Includes error handling for not found resources (404), bad requests (400), and server errors (500).
+ * - Uses transactions for database write operations to ensure atomicity.
+ */
+
+import type { Database, Statement } from "bun:sqlite";
+import { randomUUID } from "node:crypto"; // Import randomUUID for generating IDs
+
+// Types for method source response and save payload
+type SonValue = any; // Replace with more specific types if available from client later
+
+interface MethodSourceResponse {
+	selector: string;
+	arguments: SonValue[];
+	body: SonValue[];
+}
+
+interface SaveMethodPayload {
+	className: string;
+	selector: string;
+	arguments: SonValue[]; // Expected to be an array
+	body: SonValue[];     // Expected to be an array
+}
+
+/**
+ * Handles GET /api/classes requests.
+ * Fetches a list of all class names from the son_classes table.
+ *
+ * @param db The Bun SQLite database instance.
+ * @returns A Promise resolving to a Response object.
+ *          - 200 OK: With JSON body {"classes": ["ClassName1", ...]}
+ *          - 500 Internal Server Error: If the database query fails.
+ */
+export async function getClasses(db: Database): Promise<Response> {
+	console.log("Handling GET /api/classes");
+	try {
+		const query = db.query("SELECT name FROM son_classes ORDER BY name;");
+		const results = query.all() as { name: string }[];
+		const classNames = results.map(row => row.name);
+
+		return new Response(JSON.stringify({ classes: classNames }), {
+			headers: { "Content-Type": "application/json" },
+			status: 200,
+		});
+	} catch (error: any) {
+		console.error("Error fetching classes:", error);
+		return new Response(JSON.stringify({ error: "Failed to fetch classes", details: error.message }), {
+			headers: { "Content-Type": "application/json" },
+			status: 500,
+		});
+	}
+}
+
+/**
+ * Handles GET /api/methods/{className} requests.
+ * Fetches a list of method selectors for a given class name.
+ *
+ * @param db The Bun SQLite database instance.
+ * @param className The name of the class to fetch methods for.
+ * @returns A Promise resolving to a Response object.
+ *          - 200 OK: With JSON body {"methods": ["selector1", ...]}
+ *          - 404 Not Found: If the specified class name does not exist.
+ *          - 500 Internal Server Error: If the database query fails.
+ */
+export async function getMethods(db: Database, className: string): Promise<Response> {
+	console.log(`Handling GET /api/methods/${className}`);
+	try {
+		// First, check if the class exists
+		const classQuery = db.query("SELECT id FROM son_classes WHERE name = ?;");
+		const classResult = classQuery.get(className) as { id: string } | null;
+
+		if (!classResult) {
+			return new Response(JSON.stringify({ error: `Class not found: ${className}` }), {
+				headers: { "Content-Type": "application/json" },
+				status: 404,
+			});
+		}
+
+		const classId = classResult.id;
+
+		// Fetch method selectors for the class
+		const methodsQuery = db.query("SELECT selector FROM son_methods WHERE class_id = ? ORDER BY selector;");
+		const methodsResults = methodsQuery.all(classId) as { selector: string }[];
+		const methodSelectors = methodsResults.map(row => row.selector);
+
+		return new Response(JSON.stringify({ methods: methodSelectors }), {
+			headers: { "Content-Type": "application/json" },
+			status: 200,
+		});
+
+	} catch (error: any) {
+		console.error(`Error fetching methods for class "${className}":`, error);
+		return new Response(JSON.stringify({ error: "Failed to fetch methods", details: error.message }), {
+			headers: { "Content-Type": "application/json" },
+			status: 500,
+		});
+	}
+}
+
+/**
+ * Handles GET /api/method/{className}/{selector} requests.
+ * Fetches the source code (arguments and body JSON) for a specific method of a class.
+ *
+ * @param db The Bun SQLite database instance.
+ * @param className The name of the class.
+ * @param selector The method selector.
+ * @returns A Promise resolving to a Response object.
+ *          - 200 OK: With JSON body {"selector": "...", "arguments": [...], "body": [...]}
+ *          - 404 Not Found: If the class or method does not exist.
+ *          - 500 Internal Server Error: If the database query or JSON parsing fails.
+ */
+export async function getMethodSource(db: Database, className: string, selector: string): Promise<Response> {
+	console.log(`Handling GET /api/method/${className}/${selector}`);
+	try {
+		const query = db.query(`
+      SELECT m.selector, m.arguments_json, m.body_json
+      FROM son_methods m
+      JOIN son_classes c ON m.class_id = c.id
+      WHERE c.name = ? AND m.selector = ?;
+    `);
+		const result = query.get(className, selector) as { selector: string; arguments_json: string; body_json: string } | null;
+
+		if (!result) {
+			// Check if the class exists at all to give a more specific error
+			const classQuery = db.query("SELECT id FROM son_classes WHERE name = ?;");
+			const classExists = classQuery.get(className);
+			if (!classExists) {
+				return new Response(JSON.stringify({ error: `Class not found: ${className}` }), {
+					headers: { "Content-Type": "application/json" },
+					status: 404,
+				});
+			} else {
+				return new Response(JSON.stringify({ error: `Method not found: ${selector} in class ${className}` }), {
+					headers: { "Content-Type": "application/json" },
+					status: 404,
+				});
+			}
+		}
+
+		// Parse the JSON strings for arguments and body
+		let args: SonValue[];
+		let body: SonValue[];
+		try {
+			args = JSON.parse(result.arguments_json);
+		} catch (e: any) {
+			throw new Error(`Invalid arguments JSON in database for ${className}>>${selector}: ${e.message}`);
+		}
+		try {
+			body = JSON.parse(result.body_json);
+		} catch (e: any) {
+			throw new Error(`Invalid body JSON in database for ${className}>>${selector}: ${e.message}`);
+		}
+
+
+		const responsePayload: MethodSourceResponse = {
+			selector: result.selector,
+			arguments: args,
+			body: body,
+		};
+
+		return new Response(JSON.stringify(responsePayload), {
+			headers: { "Content-Type": "application/json" },
+			status: 200,
+		});
+
+	} catch (error: any) {
+		console.error(`Error fetching method source for "${className} >> ${selector}":`, error);
+		// Differentiate between JSON parse error (likely 500) and others
+		const status = error.message.includes("Invalid") ? 500 : 500; // Default to 500
+		return new Response(JSON.stringify({ error: "Failed to fetch method source", details: error.message }), {
+			headers: { "Content-Type": "application/json" },
+			status: status,
+		});
+	}
+}
+
+/**
+ * Handles POST /api/method requests.
+ * Saves or updates a method definition in the database. Creates the class if it doesn't exist.
+ * Expects a JSON body conforming to SaveMethodPayload.
+ *
+ * @param db The Bun SQLite database instance.
+ * @param data The parsed JSON payload from the request body.
+ * @returns A Promise resolving to a Response object.
+ *          - 201 Created: If a new method was created.
+ *          - 200 OK: If an existing method was updated.
+ *          - 400 Bad Request: If the input data is invalid (missing fields, wrong types, invalid JSON strings).
+ *          - 500 Internal Server Error: If the database operation fails.
+ */
+export async function saveMethod(db: Database, data: any): Promise<Response> {
+	console.log(`Handling POST /api/method with payload:`, JSON.stringify(data));
+
+	// --- Input Validation ---
+	if (!data || typeof data !== 'object') {
+		return new Response(JSON.stringify({ error: "Invalid request body: Expected JSON object." }), { status: 400, headers: { "Content-Type": "application/json" } });
+	}
+
+	const { className, selector, arguments: args, body } = data as Partial<SaveMethodPayload>;
+
+	if (typeof className !== 'string' || !className.trim()) {
+		return new Response(JSON.stringify({ error: "Invalid request body: 'className' must be a non-empty string." }), { status: 400, headers: { "Content-Type": "application/json" } });
+	}
+	if (typeof selector !== 'string' || !selector.trim()) {
+		return new Response(JSON.stringify({ error: "Invalid request body: 'selector' must be a non-empty string." }), { status: 400, headers: { "Content-Type": "application/json" } });
+	}
+	if (!Array.isArray(args)) {
+		return new Response(JSON.stringify({ error: "Invalid request body: 'arguments' must be an array." }), { status: 400, headers: { "Content-Type": "application/json" } });
+	}
+	if (!Array.isArray(body)) {
+		return new Response(JSON.stringify({ error: "Invalid request body: 'body' must be an array." }), { status: 400, headers: { "Content-Type": "application/json" } });
+	}
+
+	let argsJsonString: string;
+	let bodyJsonString: string;
+	try {
+		argsJsonString = JSON.stringify(args);
+		bodyJsonString = JSON.stringify(body);
+	} catch (e: any) {
+		console.error("Error stringifying arguments/body JSON:", e);
+		return new Response(JSON.stringify({ error: "Invalid request body: Could not serialize 'arguments' or 'body' to JSON.", details: e.message }), { status: 400, headers: { "Content-Type": "application/json" } });
+	}
+
+	// --- Database Operation (Transaction) ---
+	try {
+		// Prepare statements within the transaction function for efficiency if called repeatedly,
+		// but for a single handler, defining them here is fine.
+		const insertClassStmt = db.prepare("INSERT INTO son_classes (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING;");
+		const selectClassIdStmt = db.prepare("SELECT id FROM son_classes WHERE name = ?;");
+		const upsertMethodStmt = db.prepare(`
+      INSERT INTO son_methods (id, class_id, selector, arguments_json, body_json)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(class_id, selector) DO UPDATE SET
+        arguments_json = excluded.arguments_json,
+        body_json = excluded.body_json;
+    `);
+
+        // Wrap operations in a transaction
+		const runTransaction = db.transaction(() => {
+			// 1. Ensure class exists and get its ID
+			const classUUID = randomUUID();
+			insertClassStmt.run(classUUID, className.trim()); // Trim whitespace
+
+			const classResult = selectClassIdStmt.get(className.trim()) as { id: string } | null;
+			if (!classResult) {
+				// This should ideally not happen if INSERT worked, but defensively check.
+				throw new Error(`Failed to find or create class: ${className.trim()}`);
+			}
+			const classId = classResult.id;
+
+			// 2. Insert or Update the method
+            // Need to check if it was an insert or update to return correct status
+            const checkExistingStmt = db.prepare("SELECT id FROM son_methods WHERE class_id = ? AND selector = ?");
+            const existingMethod = checkExistingStmt.get(classId, selector.trim());
+
+			const methodUUID = randomUUID();
+			upsertMethodStmt.run(methodUUID, classId, selector.trim(), argsJsonString, bodyJsonString);
+
+            return { wasInsert: !existingMethod }; // Return whether it was a new method
+		});
+
+        // Execute the transaction
+		const { wasInsert } = runTransaction();
+
+        // Determine status code based on whether a new method was created
+		const status = wasInsert ? 201 : 200;
+        const message = wasInsert ? "Method created successfully" : "Method updated successfully";
+
+		console.log(`${message} for ${className.trim()}>>${selector.trim()}`);
+		return new Response(JSON.stringify({ message }), {
+			status: status,
+			headers: { "Content-Type": "application/json" },
+		});
+
+	} catch (error: any) {
+		console.error(`Error saving method "${className.trim()} >> ${selector.trim()}":`, error);
+		return new Response(JSON.stringify({ error: "Failed to save method to database", details: error.message }), {
+			status: 500,
+			headers: { "Content-Type": "application/json" },
+		});
+	}
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>server/server.ts</file_path>
+      <file_code><![CDATA[/**
+ * @file server/server.ts
+ * @description Main entry point for the SON Environment BunJS backend server.
+ *              Sets up an HTTP server with basic routing and WebSocket support.
+ *              Includes routing for API endpoints to handle SON environment persistence.
+ * 
+ * Key features:
+ * - Serves HTTP requests for API endpoints.
+ * - Handles WebSocket connections (basic logging).
+ * - Implements routing for GET and POST API calls related to SON classes, methods, and base environment.
+ * - Includes CORS handling for cross-origin requests from the client.
+ * - Uses bun:sqlite database connection managed in db.ts.
+ * 
+ * @dependencies
+ * - bun: Provides the Bun runtime APIs, including Bun.serve and WebSocket types.
+ * - ./db: Imports the initialized SQLite database instance.
+ * - ./api/environmentHandlers: Handlers for base environment API requests.
+ * - ./api/persistenceHandlers: Handlers for class/method persistence API requests (GET and POST).
+ * 
+ * @notes
+ * - This server provides the API endpoints for the Next.js client application.
+ * - Routing is handled manually based on the URL pathname and HTTP method.
+ * - WebSocket support is included but handlers are minimal (logging only) for MVP.
+ * - CORS headers are added to allow requests from the client development server.
+ */
+
+import { db } from "./db"; // Import the initialized database instance
+import { getBaseEnvironment } from "./api/environmentHandlers";
+import { getClasses, getMethods, getMethodSource, saveMethod } from "./api/persistenceHandlers"; // Import saveMethod
+import type { ServerWebSocket, WebSocketHandler } from "bun";
+
+const PORT = process.env.PORT ?? 3013; // Use PORT from env or default to 3013
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? "http://localhost:3000"; // Expected client origin
+
+console.log(`Starting SON Environment backend server on port ${PORT}...`);
+console.log(`Allowing CORS requests from: ${CLIENT_ORIGIN}`);
+
+// CORS Headers - Adjust origin as needed for production
+const corsHeaders = {
+	"Access-Control-Allow-Origin": CLIENT_ORIGIN, // Allow requests from the client's origin
+	"Access-Control-Allow-Methods": "GET, POST, OPTIONS", // Allowed HTTP methods
+	"Access-Control-Allow-Headers": "Content-Type, Authorization", // Allowed headers
+	"Access-Control-Allow-Credentials": "true", // If you need to handle credentials/cookies
+};
+
+
+// Define WebSocket behavior (minimal for now)
+const wsHandler: WebSocketHandler<{ authToken: string }> = {
+	open(ws: ServerWebSocket<{ authToken: string }>) {
+		console.log(`WebSocket connection opened: ${ws.remoteAddress}`);
+	},
+	message(ws: ServerWebSocket<{ authToken: string }>, message: string | BufferSource) {
+		console.log(`Received message from ${ws.remoteAddress}:`, message);
+		// Example broadcast (not used in MVP core logic):
+		// ws.publish("the-lobby", `${ws.data.authToken} says: ${message}`);
+	},
+	close(ws: ServerWebSocket<{ authToken: string }>, code: number, reason?: string) {
+		console.log(`WebSocket connection closed: ${ws.remoteAddress}, Code: ${code}, Reason: ${reason}`);
+	},
+	drain(ws: ServerWebSocket<{ authToken: string }>) {
+		console.log(`WebSocket connection drained: ${ws.remoteAddress}`);
+	},
+};
+
+
+// Start the Bun server
+const server = Bun.serve<{ authToken: string }>({
+	port: PORT,
+	/**
+	 * Handles incoming HTTP requests.
+	 * @param req The incoming request object.
+	 * @param server The Bun server instance.
+	 * @returns A Promise resolving to a Response object or undefined (for WebSocket upgrade).
+	 */
+	async fetch(req: Request, server) {
+		const url = new URL(req.url);
+		const pathname = url.pathname;
+
+		console.log(`[${new Date().toISOString()}] ${req.method} ${pathname}`);
+
+        // Handle CORS preflight requests (OPTIONS)
+        if (req.method === "OPTIONS") {
+            console.log("Handling OPTIONS preflight request");
+            return new Response(null, {
+                status: 204, // No Content
+                headers: corsHeaders,
+            });
+        }
+
+		// Handle WebSocket upgrade requests
+		if (pathname === "/ws") {
+            // Optional: Check origin for WebSocket upgrade
+            const origin = req.headers.get("origin");
+            if (origin !== CLIENT_ORIGIN) {
+                console.warn(`WebSocket upgrade rejected from origin: ${origin}`);
+                // Send CORS headers even on rejection for consistency if browser expects them.
+                return new Response("Forbidden: Invalid Origin", { status: 403, headers: corsHeaders });
+            }
+
+			const userData = { authToken: "user_" + Math.random().toString(16).slice(2) };
+			const success = server.upgrade(req, {
+				data: userData,
+                // Bun automatically handles necessary headers for upgrade response
+                // headers: { /* Optional custom headers */ }
+			});
+			if (success) {
+				console.log(`WebSocket upgrade successful for ${req.headers.get("sec-websocket-key")}`);
+				return; // Return undefined on successful upgrade
+			} else {
+				console.error(`WebSocket upgrade failed for ${req.headers.get("sec-websocket-key")}`);
+				// Send CORS headers even on failure
+				return new Response("WebSocket upgrade failed", { status: 400, headers: corsHeaders });
+			}
+		}
+
+		// Basic HTTP Routing
+		if (pathname === "/") {
+			return new Response("SON Environment Server is running!", {
+				headers: { "Content-Type": "text/plain", ...corsHeaders },
+			});
+		}
+
+		// --- API Route Handling ---
+		// Centralized place to add CORS headers to all API responses
+		let apiResponse: Response | null = null;
+
+		try {
+			if (pathname.startsWith("/api/")) {
+				// --- READ Endpoints ---
+				if (req.method === "GET") {
+					if (pathname === '/api/base-environment') {
+						apiResponse = await getBaseEnvironment(db);
+					} else if (pathname === '/api/classes') {
+						apiResponse = await getClasses(db);
+					} else {
+						// Match /api/methods/{className}
+						const methodsMatch = pathname.match(/^\/api\/methods\/([^\/]+)$/);
+						if (methodsMatch) {
+							const className = decodeURIComponent(methodsMatch[1]);
+							apiResponse = await getMethods(db, className);
+						} else {
+							// Match /api/method/{className}/{selector}
+							const methodSourceMatch = pathname.match(/^\/api\/method\/([^\/]+)\/(.+)$/);
+							if (methodSourceMatch) {
+								const className = decodeURIComponent(methodSourceMatch[1]);
+								const selector = decodeURIComponent(methodSourceMatch[2]);
+								apiResponse = await getMethodSource(db, className, selector);
+							}
+						}
+					}
+				}
+				// --- WRITE Endpoints ---
+				else if (req.method === 'POST' && pathname === '/api/method') {
+                    try {
+                        const data = await req.json(); // Parse request body as JSON
+                        apiResponse = await saveMethod(db, data);
+                    } catch (jsonError: any) {
+                        // Handle JSON parsing errors specifically
+                        console.error("Failed to parse request body JSON:", jsonError);
+                        apiResponse = new Response(JSON.stringify({ error: "Invalid JSON in request body", details: jsonError.message }), {
+                            status: 400, // Bad Request
+                            headers: { "Content-Type": "application/json" },
+                        });
+                    }
+				}
+
+				// If an API route was processed, return the response with CORS headers
+				if (apiResponse) {
+					// Add CORS headers to the actual response from handlers
+                    Object.entries(corsHeaders).forEach(([key, value]) => {
+                        apiResponse!.headers.set(key, value);
+                    });
+					return apiResponse;
+				} else {
+                    // If API path but no specific handler matched
+                    console.log(`API route not found: ${req.method} ${pathname}`);
+                    return new Response(JSON.stringify({ error: "API route not found" }), {
+                        status: 404,
+                        headers: { "Content-Type": "application/json", ...corsHeaders },
+                    });
+                }
+			}
+		} catch (error: any) {
+			// Catch unexpected errors during handler execution (e.g., DB errors not caught in handlers)
+			console.error(`Error processing request ${req.method} ${pathname}:`, error);
+			return new Response(JSON.stringify({ error: "Internal Server Error", details: error.message }), {
+				status: 500,
+				headers: { "Content-Type": "application/json", ...corsHeaders },
+			});
+		}
+
+		// Default 404 Not Found response if no route matched at all
+		console.log(`Route not found: ${req.method} ${pathname}`);
+		return new Response("Not Found", { status: 404, headers: corsHeaders });
+	},
+
+	// Attach the WebSocket handler configuration
+	websocket: wsHandler,
+
+	/**
+	 * Handles errors during request processing *before* the fetch handler runs or general server errors.
+	 * @param error The error object.
+	 * @returns A Response object indicating an internal server error.
+	 */
+	error(error: Error) {
+		console.error("Server error:", error);
+		// Add CORS headers to error responses too
+		return new Response(JSON.stringify({ error: "Internal Server Error", details: error.message }), {
+             status: 500,
+             headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+	},
+});
+
+console.log(`SON Environment server listening on http://${server.hostname}:${server.port}`);
+
+// Example: Log database path on startup
+try {
+    const result = db.query("PRAGMA database_list;").get();
+    // @ts-expect-error - result might be unknown type, but structure is known for PRAGMA
+    console.log(`Database file: ${result?.file ?? 'N/A'}`);
+} catch (e) {
+    console.error("Could not query database path:", e);
+}
+]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>
+Use code with caution.
+Xml
+STEP 5 COMPLETE. Here's what I did and why:
+server/api/persistenceHandlers.ts:
+Imported randomUUID from node:crypto for generating primary keys.
+Defined SaveMethodPayload interface for type safety of the expected request body.
+Implemented the saveMethod async function:
+Added robust input validation for className, selector, arguments (must be array), and body (must be array). Returns 400 Bad Request if validation fails.
+Added try...catch for JSON.stringify on arguments and body to handle potential circular references or other serialization errors, returning 400.
+Implemented the core logic within a db.transaction() block to ensure atomicity:
+Prepared SQL statements for inserting/checking classes and upserting methods.
+Generated a UUID for the class and attempted to insert it (ON CONFLICT DO NOTHING).
+Selected the class_id (either newly inserted or existing). Added defensive check if class ID wasn't found.
+Checked if the method already exists before the upsert to determine if it's a new creation or an update.
+Generated a UUID for the method and performed the INSERT ... ON CONFLICT DO UPDATE operation.
+Returned wasInsert: true or false from the transaction based on the pre-check.
+Set the HTTP status code to 201 (Created) if wasInsert is true, or 200 (OK) if it was an update.
+Included comprehensive error handling for database errors (returning 500 Internal Server Error).
+Added console logging for received payload and success/error messages.
+server/server.ts:
+Imported the saveMethod handler function.
+Added a route handler for POST /api/method:
+Checked if the request method is POST and the pathname matches.
+Used await req.json() to parse the incoming request body.
+Wrapped the req.json() call in a try...catch to specifically handle JSON parsing errors, returning a 400 Bad Request.
+Called the saveMethod handler with the database instance and the parsed data.
+Ensured CORS headers are added to the response returned by saveMethod (moved CORS handling to apply to all API responses centrally).
+Refactored API routing slightly to handle the response centrally and apply CORS headers consistently.
+USER INSTRUCTIONS: Please do the following:
+No explicit installations are needed for this step as crypto is built-in.
+Restart the Bun server (bun run dev in the server directory) to apply the changes.
+You can now test the POST /api/method endpoint using a tool like curl or Postman/Insomnia:
+Method: POST
+URL: http://localhost:3013/api/method
+Headers: Content-Type: application/json
+Body (raw JSON):
+{
+  "className": "MyTestClass",
+  "selector": "doSomething:",
+  "arguments": ["arg1"],
+  "body": [
+    ["Transcript", "show:", ["'Processing: '", "+", "$arg1"]],
+    ["^", ["$arg1", "*", 2]]
+  ]
+}
+Use code with caution.
+Json
+Expected response (first time): Status 201 Created, Body {"message":"Method created successfully"}
+Expected response (second time with same data): Status 200 OK, Body {"message":"Method updated successfully"}
+Try sending invalid data (e.g., missing className, non-array arguments) to test validation (expect 400 errors).

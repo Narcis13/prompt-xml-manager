@@ -1,0 +1,193 @@
+Okay, I will implement Step 3: Implement Basic Bun Server and API Routing.
+Here's what I did and why for server/server.ts:
+Created the file server.ts to replace the placeholder index.ts.
+Imported the db instance from ./db.ts as required for future database interactions.
+Imported necessary types from bun-types.
+Implemented Bun.serve to start the HTTP server.
+Set up basic routing within the fetch handler using URL and request.method.
+Added a root route (/) that returns a simple success message.
+Added a basic handler for /api/* routes, currently returning a 404, preparing for future API implementation.
+Implemented WebSocket upgrade logic on the /ws path. The server will attempt to upgrade the connection if the request targets this path.
+Added minimal WebSocket event handlers (open, close, message) that just log activity to the console, fulfilling the requirement to keep the structure but make handlers minimal.
+Included a default 404 response for unhandled routes.
+Added logging to indicate the server has started and on which port.
+Included extensive JSDoc comments explaining the purpose, structure, and logic of the server setup.
+Here's what I did and why for server/index.ts:
+Marked the file for deletion as it's a placeholder and its functionality is now replaced by server.ts.
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>server/server.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * @file server/server.ts
+ * @description Main entry point for the SON Environment BunJS backend server.
+ *              Sets up an HTTP server with basic routing and WebSocket support.
+ *
+ * @dependencies
+ * - bun: Provides the Bun runtime APIs, including Bun.serve and WebSocket types.
+ * - ./db: Imports the initialized SQLite database instance.
+ *
+ * @notes
+ * - This server provides the API endpoints for the Next.js client application.
+ * - Routing is handled manually based on the URL pathname.
+ * - WebSocket support is included but handlers are minimal (logging only) for MVP.
+ * - API routes under /api/ are stubbed and will be implemented in subsequent steps.
+ */
+
+import { db } from "./db"; // Import the initialized database instance
+import type { ServerWebSocket, WebSocketHandler } from "bun";
+
+const PORT = process.env.PORT ?? 3001; // Use PORT from env or default to 3001
+
+console.log("Starting SON Environment backend server...");
+
+// Define WebSocket behavior (minimal for now)
+const wsHandler: WebSocketHandler<{ authToken: string }> = {
+	/**
+	 * Handles new WebSocket connections.
+	 * @param ws The WebSocket connection object.
+	 */
+	open(ws: ServerWebSocket<{ authToken: string }>) {
+		console.log(`WebSocket connection opened: ${ws.remoteAddress}`);
+		// Potential future use: ws.subscribe("some_topic");
+		// Access context data: console.log("Auth Token:", ws.data.authToken);
+	},
+	/**
+	 * Handles incoming WebSocket messages.
+	 * @param ws The WebSocket connection object.
+	 * @param message The received message (string | BufferSource).
+	 */
+	message(ws: ServerWebSocket<{ authToken: string }>, message: string | BufferSource) {
+		console.log(`Received message from ${ws.remoteAddress}:`, message);
+		// Potential future use: ws.publish("some_topic", message); // Broadcast
+		// ws.send("Acknowledged: " + message); // Echo back
+	},
+	/**
+	 * Handles WebSocket connection closure.
+	 * @param ws The WebSocket connection object.
+	 * @param code The closure code.
+	 * @param reason The reason for closure.
+	 */
+	close(ws: ServerWebSocket<{ authToken: string }>, code: number, reason?: string) {
+		console.log(`WebSocket connection closed: ${ws.remoteAddress}, Code: ${code}, Reason: ${reason}`);
+		// Potential future use: ws.unsubscribe("some_topic");
+	},
+	/**
+	 * Handles WebSocket connection drain (when backpressure is relieved).
+	 * @param ws The WebSocket connection object.
+	 */
+	drain(ws: ServerWebSocket<{ authToken: string }>) {
+		console.log(`WebSocket connection drained: ${ws.remoteAddress}`);
+	},
+};
+
+
+// Start the Bun server
+const server = Bun.serve<{ authToken: string }>({
+	port: PORT,
+	/**
+	 * Handles incoming HTTP requests.
+	 * @param req The incoming request object.
+	 * @param server The Bun server instance.
+	 * @returns A Response object or undefined (for WebSocket upgrade).
+	 */
+	async fetch(req: Request, server) {
+		const url = new URL(req.url);
+		const pathname = url.pathname;
+
+		console.log(`[${new Date().toISOString()}] ${req.method} ${pathname}`);
+
+		// Handle WebSocket upgrade requests
+		if (pathname === "/ws") {
+			// Define context data to attach to the WebSocket connection
+			const userData = { authToken: "user_" + Math.random().toString(16).slice(2) }; // Example context data
+
+			// Attempt to upgrade the connection
+			const success = server.upgrade(req, {
+				data: userData, // Pass context data here
+			});
+			if (success) {
+				// Bun automatically handles sending the 101 Switching Protocols response.
+				console.log(`WebSocket upgrade successful for ${req.headers.get("sec-websocket-key")}`);
+				return; // Return undefined to indicate the request was handled by the WebSocket upgrader
+			} else {
+				console.error(`WebSocket upgrade failed for ${req.headers.get("sec-websocket-key")}`);
+				return new Response("WebSocket upgrade failed", { status: 400 });
+			}
+		}
+
+		// Basic HTTP Routing
+		if (pathname === "/") {
+			return new Response("SON Environment Server is running!", {
+				headers: { "Content-Type": "text/plain" },
+			});
+		}
+
+		// API Route Handling (Placeholder)
+		if (pathname.startsWith("/api/")) {
+			// In future steps, specific API routes will be handled here by importing handlers.
+			// Example:
+			// if (pathname === '/api/classes' && req.method === 'GET') {
+			//   // return handleGetClasses(db);
+			// }
+			console.log(`Received API request for ${pathname} - Not yet implemented`);
+			return new Response("API route not found or not yet implemented", { status: 404 });
+		}
+
+		// Default 404 Not Found response
+		console.log(`Route not found: ${pathname}`);
+		return new Response("Not Found", { status: 404 });
+	},
+
+	// Attach the WebSocket handler configuration
+	websocket: wsHandler,
+
+	/**
+	 * Handles errors during request processing.
+	 * @param error The error object.
+	 * @returns A Response object indicating an internal server error.
+	 */
+	error(error: Error) {
+		console.error("Server error:", error);
+		return new Response("Internal Server Error", { status: 500 });
+	},
+});
+
+console.log(`SON Environment server listening on http://${server.hostname}:${server.port}`);
+
+// Example: Log database path on startup
+try {
+    const result = db.query("PRAGMA database_list;").get();
+    // @ts-expect-error - result might be unknown type, but structure is known for PRAGMA
+    console.log(`Database file: ${result?.file ?? 'N/A'}`);
+} catch (e) {
+    console.error("Could not query database path:", e);
+}
+
+```]]></file_code>
+    </file>
+    <file>
+      <file_operation>DELETE</file_operation>
+      <file_path>server/index.ts</file_path>
+      <file_code><![CDATA[]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>
+Use code with caution.
+Xml
+STEP 3 COMPLETE. Here's what I did and why:
+I created the main server file server/server.ts based on the specification for Step 3.
+This file initializes a Bun server using Bun.serve.
+It includes basic routing logic to handle root (/), WebSocket upgrades (/ws), and a placeholder for future API routes (/api/*).
+Minimal WebSocket handlers are included for logging purposes as requested.
+The server now imports the db instance from db.ts.
+The placeholder server/index.ts was removed as it's no longer needed.
+Error handling and server start logging were added.
+USER INSTRUCTIONS: Please do the following:
+Ensure you are in the son-environment/server directory.
+Run bun install if you haven't already (to ensure bun-types are available).
+Run the server using bun run dev (or bun run start). You should see logs indicating the server started and is listening on port 3001 (or the PORT environment variable if set), along with the database initialization messages from db.ts.
+You can test the root endpoint by navigating to http://localhost:3001 in your browser or using curl http://localhost:3001. You should see "SON Environment Server is running!".
+Testing /api/somepath should return a 404 response.
