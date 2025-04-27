@@ -1,0 +1,460 @@
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/components/ui/Panel.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines a simple, reusable Panel component.
+ * It provides a consistent container style with borders and padding for different UI sections.
+ * </ai_info>
+ *
+ * @file client/src/components/ui/Panel.tsx
+ * @description Reusable Panel component for consistent UI section styling.
+ *
+ * Key features:
+ * - Provides a div container with standard border, padding, and background.
+ * - Accepts children elements to render inside the panel.
+ * - Supports optional className prop for additional styling.
+ *
+ * @dependencies
+ * - React: Core library for component creation.
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - Styling is done using Tailwind CSS utility classes.
+ */
+"use client";
+
+import React from 'react';
+
+interface PanelProps {
+  children: React.ReactNode;
+  className?: string; // Allow passing additional classes
+  title?: string;     // Optional title for the panel
+}
+
+/**
+ * Panel Component
+ *
+ * A simple container component with consistent border and padding.
+ *
+ * @param {PanelProps} props - Component props.
+ * @param {React.ReactNode} props.children - Content to render inside the panel.
+ * @param {string} [props.className] - Optional additional CSS classes.
+ * @param {string} [props.title] - Optional title displayed above the content.
+ * @returns {JSX.Element} The Panel component.
+ */
+export default function Panel({ children, className = '', title }: PanelProps): JSX.Element {
+  return (
+    <div className={`border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 shadow-sm ${className}`}>
+      {title && (
+        <div className="px-4 py-2 border-b border-gray-300 dark:border-gray-700 font-semibold text-gray-700 dark:text-gray-300">
+          {title}
+        </div>
+      )}
+      <div className="p-2"> {/* Padding applied to inner div to not interfere with border/title */}
+        {children}
+      </div>
+    </div>
+  );
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/components/ui/ListView.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines a generic, reusable ListView component.
+ * It handles rendering a list of items, displaying loading and error states,
+ * managing item selection, and providing feedback on selection.
+ * </ai_info>
+ *
+ * @file client/src/components/ui/ListView.tsx
+ * @description Generic component for rendering selectable lists with loading/error states.
+ *
+ * Key features:
+ * - Displays a list of string items.
+ * - Shows loading indicator while data is fetching.
+ * - Shows error message if data fetching fails.
+ * - Shows "No items" message if the list is empty.
+ * - Highlights the currently selected item.
+ * - Calls an `onSelect` callback when an item is clicked.
+ *
+ * @dependencies
+ * - React: Core library for component creation.
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - Styling uses Tailwind CSS.
+ * - Designed to be used by components like ClassList and MethodList.
+ */
+"use client";
+
+import React from 'react';
+
+interface ListViewProps {
+  /** The list of items to display (currently supports string items). */
+  items: string[];
+  /** The currently selected item (used for highlighting). */
+  selectedItem: string | null;
+  /** Callback function triggered when an item is selected. */
+  onSelect: (item: string) => void;
+  /** Indicates if the data for the list is currently being loaded. */
+  isLoading: boolean;
+  /** Stores any error message that occurred during data loading. */
+  error: string | null;
+  /** Optional title for the list view. */
+  title?: string;
+   /** Optional placeholder text when loading */
+  loadingPlaceholder?: string;
+  /** Optional placeholder text when no items are available */
+  emptyPlaceholder?: string;
+   /** Optional additional CSS classes for the container */
+  className?: string;
+}
+
+/**
+ * ListView Component
+ *
+ * Renders a selectable list of items, handling loading and error states.
+ *
+ * @param {ListViewProps} props - Component props.
+ * @returns {JSX.Element} The ListView component.
+ */
+export default function ListView({
+  items,
+  selectedItem,
+  onSelect,
+  isLoading,
+  error,
+  title,
+  loadingPlaceholder = "Loading...",
+  emptyPlaceholder = "No items found.",
+  className = ""
+}: ListViewProps): JSX.Element {
+  const renderContent = () => {
+    if (isLoading) {
+      return <div className="p-4 text-center text-gray-500 dark:text-gray-400">{loadingPlaceholder}</div>;
+    }
+
+    if (error) {
+      return <div className="p-4 text-center text-red-600 dark:text-red-400">Error: {error}</div>;
+    }
+
+    if (items.length === 0) {
+      return <div className="p-4 text-center text-gray-500 dark:text-gray-400">{emptyPlaceholder}</div>;
+    }
+
+    return (
+      <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+        {items.map((item) => (
+          <li key={item}>
+            <button
+              onClick={() => onSelect(item)}
+              className={`w-full text-left px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-150 ease-in-out ${
+                selectedItem === item
+                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-semibold'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+            >
+              {item}
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
+  return (
+    <div className={`flex flex-col border border-gray-300 dark:border-gray-700 rounded-md shadow-sm overflow-hidden bg-white dark:bg-gray-800 ${className}`}>
+       {title && (
+        <div className="px-4 py-2 border-b border-gray-300 dark:border-gray-700 font-semibold text-gray-700 dark:text-gray-300">
+          {title}
+        </div>
+      )}
+      <div className="overflow-y-auto flex-grow">
+        {renderContent()}
+      </div>
+    </div>
+  );
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/components/ClassList.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the ClassList component, responsible for displaying a list of
+ * SON class names fetched from the backend API. It manages its own state for
+ * loading, errors, and the list of classes. It uses the generic ListView component
+ * for rendering and handles user selection by calling a callback function.
+ * </ai_info>
+ *
+ * @file client/src/components/ClassList.tsx
+ * @description Component to display a list of SON classes fetched from the API.
+ *
+ * Key features:
+ * - Fetches class names using `apiClient.getClasses` on mount.
+ * - Manages loading and error states during the fetch.
+ * - Uses the `ListView` component to render the list.
+ * - Accepts `selectedClassName` prop to highlight the current selection.
+ * - Calls `onClassSelect` callback when a class name is clicked.
+ *
+ * @dependencies
+ * - React: `useState`, `useEffect`.
+ * - ../lib/apiClient: `getClasses` function.
+ * - ./ui/ListView: Generic list rendering component.
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ */
+"use client";
+
+import React, { useState, useEffect } from 'react';
+import { getClasses } from '@/lib/apiClient';
+import ListView from './ui/ListView'; // Import the generic ListView
+
+interface ClassListProps {
+  /** The currently selected class name (passed down for highlighting). */
+  selectedClassName: string | null;
+  /** Callback function triggered when a class is selected by the user. */
+  onClassSelect: (className: string) => void;
+  /** Optional additional CSS classes for the container */
+  className?: string;
+}
+
+/**
+ * ClassList Component
+ *
+ * Fetches and displays a list of SON class names from the backend API.
+ * Allows users to select a class.
+ *
+ * @param {ClassListProps} props - Component props.
+ * @returns {JSX.Element} The ClassList component.
+ */
+export default function ClassList({ selectedClassName, onClassSelect, className = "" }: ClassListProps): JSX.Element {
+  const [classes, setClasses] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchClasses = async () => {
+      setIsLoading(true);
+      setError(null);
+      setClasses([]); // Clear previous classes while loading
+      console.log("ClassList: Fetching classes...");
+      try {
+        const response = await getClasses();
+        setClasses(response.classes);
+        console.log("ClassList: Fetched classes:", response.classes);
+      } catch (err: any) {
+        console.error("ClassList: Failed to fetch classes:", err);
+        setError(err.message || "Failed to load classes.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchClasses();
+  }, []); // Empty dependency array means this runs once on mount
+
+  return (
+    <ListView
+      items={classes}
+      selectedItem={selectedClassName}
+      onSelect={onClassSelect} // Pass the callback directly to ListView
+      isLoading={isLoading}
+      error={error}
+      title="Classes"
+      loadingPlaceholder="Loading classes..."
+      emptyPlaceholder="No classes defined."
+      className={`min-h-[100px] ${className}`} // Add min-height to prevent collapse when empty/loading
+    />
+  );
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/components/SystemBrowser.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the SystemBrowser component, which serves as the container
+ * for browsing SON classes and their methods. It orchestrates the ClassList,
+ * MethodList, and CodeViewer components, managing the selected class and method state.
+ * </ai_info>
+ *
+ * @file client/src/components/SystemBrowser.tsx
+ * @description Container component for the SON System Browser interface.
+ *
+ * Key features:
+ * - Manages the state for `selectedClassName` and `selectedMethodSelector`.
+ * - Renders the `ClassList` component.
+ * - Renders placeholders for `MethodList` and `CodeViewer` (to be implemented later).
+ * - Uses Tailwind CSS for a multi-panel layout (Classes, Methods, Code).
+ *
+ * @dependencies
+ * - React: `useState`.
+ * - ./ClassList: Component to display the list of classes.
+ * - ./ui/Panel: Reusable panel component (optional, but used for structure).
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - State is managed locally within this component for now.
+ * - The layout divides the browser into three main sections.
+ */
+"use new client"; // Correction: should be "use client";
+
+import React, { useState } from 'react';
+import ClassList from './ClassList';
+import Panel from './ui/Panel'; // Optional panel component
+
+/**
+ * SystemBrowser Component
+ *
+ * Provides the main interface for browsing SON classes and methods.
+ * Contains ClassList, MethodList (placeholder), and CodeViewer (placeholder).
+ *
+ * @returns {JSX.Element} The SystemBrowser component.
+ */
+export default function SystemBrowser(): JSX.Element {
+  const [selectedClassName, setSelectedClassName] = useState<string | null>(null);
+  // Placeholder state for selected method - will be used by MethodList and CodeViewer
+  const [selectedMethodSelector, setSelectedMethodSelector] = useState<string | null>(null);
+
+  /**
+   * Handles the selection of a class from the ClassList component.
+   * Updates the selected class name state and resets the selected method.
+   * @param className - The name of the selected class.
+   */
+  const handleClassSelect = (className: string) => {
+    console.log("SystemBrowser: Class selected:", className);
+    setSelectedClassName(className);
+    setSelectedMethodSelector(null); // Reset method selection when class changes
+  };
+
+   /**
+   * Handles the selection of a method from the MethodList component.
+   * @param selector - The selector of the selected method.
+   */
+   const handleMethodSelect = (selector: string) => {
+    console.log("SystemBrowser: Method selected:", selector);
+    setSelectedMethodSelector(selector);
+  };
+
+
+  return (
+    // Main container for the browser, using flex column layout
+    <div className="flex flex-col h-full space-y-2 p-2 bg-gray-100 dark:bg-gray-900">
+      {/* Class List Panel */}
+      <div className="flex-shrink-0 h-1/3 overflow-hidden">
+         {/* Min height ensures visibility even if list is short initially */}
+        <ClassList
+          selectedClassName={selectedClassName}
+          onClassSelect={handleClassSelect}
+          className="h-full" // Make ClassList fill its container height
+        />
+      </div>
+
+      {/* Method List Panel (Placeholder) */}
+      <div className="flex-shrink-0 h-1/3 overflow-hidden">
+        <Panel title="Methods" className="h-full flex flex-col">
+            <div className="flex-grow flex items-center justify-center text-gray-400 dark:text-gray-500 text-sm">
+                {selectedClassName ? `(Method List for ${selectedClassName})` : "(Select a class)"}
+                {/* MethodList component will go here, passing selectedClassName and handleMethodSelect */}
+            </div>
+        </Panel>
+      </div>
+
+      {/* Code Viewer Panel (Placeholder) */}
+      <div className="flex-grow overflow-hidden">
+         <Panel title="Code" className="h-full flex flex-col">
+             <div className="flex-grow flex items-center justify-center text-gray-400 dark:text-gray-500 text-sm">
+                {selectedMethodSelector ? `(Code for ${selectedClassName} >> ${selectedMethodSelector})` : "(Select a method)"}
+                 {/* CodeViewer component will go here, passing selectedClassName and selectedMethodSelector */}
+             </div>
+         </Panel>
+      </div>
+    </div>
+  );
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/components/IDE.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the main Integrated Development Environment (IDE) layout component.
+ * It structures the user interface into distinct areas for the System Browser and the Workspace,
+ * using Tailwind CSS for flexible layout management. This component acts as the primary
+ * container for the core interactive elements of the SON Environment.
+ * </ai_info>
+ *
+ * @file client/src/components/IDE.tsx
+ * @description Main layout component for the SON IDE interface.
+ *
+ * Key features:
+ * - Uses Tailwind CSS Flexbox to create a two-column layout.
+ * - Defines areas for the System Browser (left) and Workspace (right).
+ * - Renders the actual `SystemBrowser` component and a placeholder for `Workspace`.
+ * - Designed to fill the available vertical space within its parent container.
+ *
+ * @dependencies
+ * - React: Core library for component creation.
+ * - ./SystemBrowser: The component for browsing classes and methods.
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - The `Workspace` component will replace its placeholder later.
+ * - Layout proportions (e.g., `w-1/3`, `w-2/3`) can be adjusted as needed.
+ */
+"use client";
+
+import React from 'react';
+import SystemBrowser from './SystemBrowser'; // Import the SystemBrowser component
+
+/**
+ * IDE Component
+ *
+ * Renders the main structural layout for the SON Environment's IDE,
+ * dividing the space into sections for system browsing and code workspace.
+ *
+ * @returns {JSX.Element} The IDE layout structure.
+ */
+export default function IDE(): JSX.Element {
+  return (
+    // Flex container to manage the overall layout, allowing children to grow
+    // Takes full height of its container (e.g., the main content area of the page)
+    <div className="flex flex-grow h-full border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden shadow-md">
+
+      {/* Left Panel: System Browser Area */}
+      {/* Ensure this container allows SystemBrowser to control its own scrolling if needed */}
+      <div className="w-1/3 border-r border-gray-300 dark:border-gray-700 flex flex-col overflow-hidden">
+        {/* Render the actual SystemBrowser component */}
+        <SystemBrowser />
+      </div>
+
+      {/* Right Panel: Workspace Area */}
+      <div className="w-2/3 flex flex-col overflow-y-auto bg-white dark:bg-gray-950">
+        {/* Placeholder for the Workspace component */}
+        <div className="p-4 h-full flex items-center justify-center ">
+           <span className="text-gray-500 dark:text-gray-400">Workspace Placeholder</span>
+          {/* Actual <Workspace /> will go here */}
+        </div>
+      </div>
+    </div>
+  );
+}
+]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>

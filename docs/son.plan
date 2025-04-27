@@ -135,7 +135,7 @@ Okay, let's break down the development of the SON Environment application into a
         *   `son-environment/client/src/app/page.tsx`: Render the `<IDE />` component.
     *   **Step Dependencies**: Step 6.
 
--   [ ] **Step 11: Implement System Browser - Class List**
+-   [x] **Step 11: Implement System Browser - Class List**
     *   **Task**: Create the `SystemBrowser` container component and the `ClassList` component. `ClassList` should fetch the list of class names from the backend API on mount and display them as a clickable list. Manage selected class state.
     *   **Files**:
         *   `son-environment/client/src/components/ui/Panel.tsx`: (Optional) Create a simple reusable Panel component for consistent styling.
@@ -145,14 +145,14 @@ Okay, let's break down the development of the SON Environment application into a
         *   `son-environment/client/src/components/IDE.tsx`: Render the `<SystemBrowser />` component in its designated area.
     *   **Step Dependencies**: Step 7, Step 9, Step 10.
 
--   [ ] **Step 12: Implement System Browser - Method List**
+-   [x] **Step 12: Implement System Browser - Method List**
     *   **Task**: Create the `MethodList` component. It should receive the selected class name as a prop and fetch/display the corresponding method selectors from the API. Manage selected method state.
     *   **Files**:
         *   `son-environment/client/src/components/MethodList.tsx`: (`"use client"`) Accept `selectedClassName` and `onMethodSelect` callback as props. Use `useEffect` to fetch methods via `apiClient.getMethods(selectedClassName)` when the class name changes. Store methods, loading, error states. Render the list of selectors. Call `onMethodSelect` on click.
         *   `son-environment/client/src/components/SystemBrowser.tsx`: Render `MethodList`, passing `selectedClassName` and managing `selectedMethodSelector` state.
     *   **Step Dependencies**: Step 7, Step 11.
 
--   [ ] **Step 13: Implement System Browser - Code Viewer**
+-   [x] **Step 13: Implement System Browser - Code Viewer**
     *   **Task**: Create the `CodeViewer` component. It should receive the selected class name and method selector as props, fetch the method's SON source code from the API, and display it (pretty-printed JSON).
     *   **Files**:
         *   `son-environment/client/src/components/CodeViewer.tsx`: (`"use client"`) Accept `className` and `selector` as props. Use `useEffect` to fetch source via `apiClient.getMethodSource(className, selector)` when props change. Store source code JSON, loading, error states. Display the fetched JSON using `<pre>` and `JSON.stringify(..., null, 2)` or integrate a simple JSON viewer/editor component in read-only mode (e.g., `react-simple-code-editor` configured as read-only).

@@ -1,0 +1,287 @@
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/components/CodeViewer.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the CodeViewer component, responsible for fetching and displaying
+ * the SON (Smalltalk Object Notation) source code for a specific method selected
+ * in the System Browser. It takes the class name and method selector as props,
+ * fetches the corresponding source code from the backend API, and renders it
+ * in a readable, pretty-printed JSON format within a <pre> tag. It also handles
+ * loading and error states during the fetch operation.
+ * </ai_info>
+ *
+ * @file client/src/components/CodeViewer.tsx
+ * @description Component to fetch and display SON method source code.
+ *
+ * Key features:
+ * - Accepts `className` and `selector` props to identify the method.
+ * - Fetches method source using `apiClient.getMethodSource` when props change.
+ * - Manages loading and error states during the fetch.
+ * - Displays the fetched SON JSON using `<pre>` and `JSON.stringify`.
+ * - Shows appropriate messages when no method is selected, loading, or on error.
+ *
+ * @dependencies
+ * - React: `useState`, `useEffect`.
+ * - ../lib/apiClient: `getMethodSource` function and related types (`MethodSourceResponse`).
+ * - ./ui/Panel: Reusable panel component for structure and title.
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - Uses `JSON.stringify` for pretty-printing; a dedicated syntax highlighter could be added later.
+ */
+"use client";
+
+import React, { useState, useEffect } from 'react';
+import { getMethodSource, MethodSourceResponse, SonValue } from '@/lib/apiClient';
+import Panel from './ui/Panel'; // Assuming a reusable Panel component exists
+
+interface CodeViewerProps {
+  /** The name of the class containing the method. Null if no class selected. */
+  className: string | null;
+  /** The selector of the method to display. Null if no method selected. */
+  selector: string | null;
+  /** Optional additional CSS classes for the container */
+  classNameContainer?: string; // Renamed to avoid conflict with component's className prop
+}
+
+/**
+ * CodeViewer Component
+ *
+ * Fetches and displays the SON source code for a selected method.
+ * Handles loading, error, and empty states.
+ *
+ * @param {CodeViewerProps} props - Component props.
+ * @returns {JSX.Element} The CodeViewer component.
+ */
+export default function CodeViewer({ className, selector, classNameContainer = "" }: CodeViewerProps): JSX.Element {
+  // State to hold the fetched method source (arguments and body)
+  const [methodSource, setMethodSource] = useState<MethodSourceResponse | null>(null);
+  // State to track loading status
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // State to store any errors during fetch
+  const [error, setError] = useState<string | null>(null);
+
+  // Effect hook to fetch method source when className or selector changes
+  useEffect(() => {
+    // Only proceed if both className and selector are provided
+    if (className && selector) {
+      const fetchSource = async () => {
+        setIsLoading(true);
+        setError(null);
+        setMethodSource(null); // Clear previous source while loading
+        console.log(`CodeViewer: Fetching source for "${className} >> ${selector}"...`);
+        try {
+          // Call the API client function
+          const response = await getMethodSource(className, selector);
+          setMethodSource(response);
+          console.log(`CodeViewer: Fetched source for "${className} >> ${selector}".`);
+        } catch (err: any) {
+          console.error(`CodeViewer: Failed to fetch source for "${className} >> ${selector}":`, err);
+          setError(err.message || `Failed to load source code.`);
+          // Keep methodSource null on error
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      fetchSource();
+    } else {
+      // If className or selector is missing, reset the state
+      setMethodSource(null);
+      setIsLoading(false);
+      setError(null);
+    }
+  }, [className, selector]); // Re-run effect if className or selector changes
+
+  // Function to render the content based on the current state
+  const renderContent = () => {
+    if (!className || !selector) {
+      return <div className="p-4 text-center text-gray-500 dark:text-gray-400">Select a class and method to view code.</div>;
+    }
+
+    if (isLoading) {
+      return <div className="p-4 text-center text-gray-500 dark:text-gray-400">{`Loading source for ${className} >> ${selector}...`}</div>;
+    }
+
+    if (error) {
+      return <div className="p-4 text-center text-red-600 dark:text-red-400">Error: {error}</div>;
+    }
+
+    if (methodSource) {
+      // Format the method definition as a SON literal array for display
+      // This reconstructs the `define:args:body:` structure for clarity,
+      // although the API only returns the core components.
+      const displayJson: SonValue = [
+        "define:args:body:", // Pseudo-form indicator
+        methodSource.selector,
+        methodSource.arguments,
+        methodSource.body,
+      ];
+
+      return (
+        <pre className="p-4 text-xs font-mono bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 overflow-auto h-full">
+          {JSON.stringify(displayJson, null, 2)}
+        </pre>
+      );
+    }
+
+    // Should ideally not be reached if className and selector are present,
+    // but acts as a fallback state.
+    return <div className="p-4 text-center text-gray-500 dark:text-gray-400">No source code available.</div>;
+  };
+
+  // Determine the title for the panel
+  const panelTitle = className && selector ? `${className} >> ${selector}` : "Code Viewer";
+
+  return (
+    // Use the Panel component for consistent styling
+    <Panel title={panelTitle} className={`flex flex-col ${classNameContainer}`}>
+      {/* Make the content area grow and allow scrolling */}
+      <div className="flex-grow overflow-auto">
+        {renderContent()}
+      </div>
+    </Panel>
+  );
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/components/SystemBrowser.tsx</file_path>
+      <file_code><![CDATA[
+/**
+<ai_info>
+This file defines the SystemBrowser component, which serves as the container
+for browsing SON classes and their methods. It orchestrates the ClassList,
+MethodList, and CodeViewer components, managing the selected class and method state.
+It has been updated to include the actual CodeViewer component, replacing the placeholder.
+</ai_info>
+@file client/src/components/SystemBrowser.tsx
+@description Container component for the SON System Browser interface.
+Key features:
+Manages the state for selectedClassName and selectedMethodSelector.
+Renders the ClassList component.
+Renders the MethodList component, passing necessary props.
+Renders the CodeViewer component, passing selected class and method.
+Uses Tailwind CSS for a multi-panel layout (Classes, Methods, Code).
+@dependencies
+React: useState.
+./ClassList: Component to display the list of classes.
+./MethodList: Component to display the list of methods for the selected class.
+./CodeViewer: Component to display the source code for the selected method. // Added
+./ui/Panel: Reusable panel component (optional, but used for structure).
+@notes
+Marked as a client component ("use client").
+State is managed locally within this component for now.
+The layout divides the browser into three main sections.
+*/
+"use client"; // Correct directive
+import React, { useState } from 'react';
+import ClassList from './ClassList';
+import MethodList from './MethodList';
+import CodeViewer from './CodeViewer'; // Import the CodeViewer component
+import Panel from './ui/Panel'; // Optional panel component
+
+/**
+SystemBrowser Component
+Provides the main interface for browsing SON classes and methods.
+Contains ClassList, MethodList, and CodeViewer.
+@returns {JSX.Element} The SystemBrowser component.
+*/
+export default function SystemBrowser(): JSX.Element {
+  const [selectedClassName, setSelectedClassName] = useState<string | null>(null);
+  // State for selected method - used by MethodList and CodeViewer
+  const [selectedMethodSelector, setSelectedMethodSelector] = useState<string | null>(null);
+
+  /**
+  Handles the selection of a class from the ClassList component.
+  Updates the selected class name state and resets the selected method.
+  @param className - The name of the selected class.
+  */
+  const handleClassSelect = (className: string) => {
+    console.log("SystemBrowser: Class selected:", className);
+    // Only update if the class name actually changed to avoid unnecessary re-renders/fetches
+    if (className !== selectedClassName) {
+      setSelectedClassName(className);
+      setSelectedMethodSelector(null); // Reset method selection when class changes
+    }
+  };
+
+  /**
+  Handles the selection of a method from the MethodList component.
+  Updates the selected method selector state.
+  @param selector - The selector of the selected method.
+  */
+  const handleMethodSelect = (selector: string) => {
+    console.log("SystemBrowser: Method selected:", selector);
+    setSelectedMethodSelector(selector);
+  };
+
+  return (
+    // Main container for the browser, using flex column layout
+    <div className="flex flex-col h-full space-y-2 p-2 bg-gray-100 dark:bg-gray-900">
+      {/* Class List Panel */}
+      <div className="flex-shrink-0 h-1/3 overflow-hidden">
+        {/* Min height ensures visibility even if list is short initially */}
+        <ClassList
+          selectedClassName={selectedClassName}
+          onClassSelect={handleClassSelect}
+          className="h-full" // Make ClassList fill its container height
+        />
+      </div>
+
+      {/* Method List Panel */}
+      <div className="flex-shrink-0 h-1/3 overflow-hidden">
+        {/* Render the actual MethodList component */}
+        <MethodList
+          selectedClassName={selectedClassName}
+          selectedMethodSelector={selectedMethodSelector}
+          onMethodSelect={handleMethodSelect}
+          className="h-full" // Make MethodList fill its container height
+        />
+      </div>
+
+      {/* Code Viewer Panel - Now renders the actual CodeViewer component */}
+      <div className="flex-grow overflow-hidden">
+         {/* Pass selected class/method to CodeViewer and make it fill height */}
+         <CodeViewer
+             className={selectedClassName}
+             selector={selectedMethodSelector}
+             classNameContainer="h-full"
+          />
+      </div>
+    </div>
+  )
+}
+]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>
+Use code with caution.
+Xml
+STEP 13 COMPLETE. Here's what I did and why:
+client/src/components/CodeViewer.tsx (CREATE):
+Created a new client component CodeViewer.
+It accepts className and selector as props.
+Uses useState to manage the fetched methodSource, isLoading, and error states.
+Uses useEffect to trigger the apiClient.getMethodSource fetch whenever className or selector changes. It includes checks to only fetch when both props are valid.
+Implements a renderContent function to display different UI based on the component's state (loading, error, no selection, or displaying code).
+Renders the fetched method source using JSON.stringify(..., null, 2) inside a <pre> tag for basic pretty-printing and monospaced font display. It reconstructs a pseudo define:args:body: structure for readability.
+Wrapped the content in the reusable Panel component for consistent styling and added a dynamic title.
+Ensured the content area (<pre> or messages) is scrollable if needed.
+client/src/components/SystemBrowser.tsx (UPDATE):
+Imported the newly created CodeViewer component.
+Replaced the placeholder div in the "Code Viewer Panel" section with the actual <CodeViewer /> component.
+Passed the selectedClassName and selectedMethodSelector state variables as props to the CodeViewer.
+Added classNameContainer="h-full" to ensure the CodeViewer (specifically its outer Panel) fills the available vertical space in its layout section.
+USER INSTRUCTIONS: Please do the following:
+Verify Frontend: Run the client (bun run dev in client/) and the server (bun run dev in server/). Check the System Browser:
+Select a class (e.g., "Counter" or "Point" if seeded).
+Select a method (e.g., "increment" or "x:").
+Verify that the Code Viewer panel updates to show the corresponding SON JSON source code fetched from the backend, correctly formatted.
+Test the loading and error states (e.g., by temporarily stopping the backend or selecting a class/method that doesn't exist).
+Verify the placeholder messages when no class/method is selected.
