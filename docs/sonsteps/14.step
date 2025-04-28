@@ -1,0 +1,352 @@
+Okay, proceeding with Step 14: Implement Workspace - Editor and Basic Layout.
+Step 14 Analysis:
+Create Button Component: A reusable button component (client/src/components/ui/Button.tsx) will ensure consistent button styling across the application.
+Create Workspace Component: The core Workspace.tsx component will be created. It needs:
+A layout using Tailwind CSS (Flexbox is suitable) to arrange the editor, buttons, results area, and console area.
+Integration of react-simple-code-editor for JSON input. I'll need to add state management (useState) for the code content.
+Placeholder buttons ("Execute", "Save Method") using the new Button component.
+Placeholder div elements styled as panels for the "Results" and "Console Output" areas.
+The component must be marked "use client".
+Update IDE Component: The existing placeholder in IDE.tsx will be replaced with the actual <Workspace /> component.
+Code Generation:
+Here's what I did and why for client/src/components/ui/Button.tsx:
+I created a new reusable Button component using Tailwind CSS for consistent styling. This follows the plan and provides a standard button element with basic styling, hover effects, and support for passing additional class names and standard button props (like onClick, disabled). It's marked "use client" as it's part of the client-side UI component library.
+Here's what I did and why for client/src/components/Workspace.tsx:
+I created the Workspace component as specified.
+It uses Flexbox (flex flex-col) to structure its internal layout vertically.
+It integrates react-simple-code-editor for the SON JSON input area.
+State (code, setCode) is added using useState to manage the editor's content, initialized with a simple SON example.
+Placeholder buttons ("Execute", "Save Method") are added using the new Button component. Their onClick handlers are currently empty placeholders.
+Placeholder panels (using the existing Panel component) are added for "Results" and "Console Output".
+The component is marked "use client".
+Required imports (React, useState, Editor, Panel, Button) are included.
+Basic props interface (WorkspaceProps) is defined, though empty for now.
+Added syntax highlighting props for JSON to the editor.
+Here's what I did and why for client/src/components/IDE.tsx:
+I updated the IDE component to replace the placeholder div in the right panel with the newly created <Workspace /> component. This integrates the workspace into the main application layout. I also imported the Workspace component.
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/components/ui/Button.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines a simple, reusable Button component using Tailwind CSS.
+ * It provides consistent styling for buttons across the application, handling
+ * variants, hover/focus states, and disabled state.
+ * </ai_info>
+ *
+ * @file client/src/components/ui/Button.tsx
+ * @description Reusable Button component with Tailwind styling.
+ *
+ * Key features:
+ * - Basic styling for primary actions.
+ * - Hover and focus states.
+ * - Disabled state styling.
+ * - Allows passing standard button attributes (like onClick, type).
+ * - Supports additional className prop for customization.
+ *
+ * @dependencies
+ * - React: Core library.
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - Can be extended with different variants (secondary, destructive, etc.) later if needed.
+ */
+"use client";
+
+import React from 'react';
+
+// Inherit standard button props
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  children: React.ReactNode;
+  // Add variant prop later if needed (e.g., 'primary', 'secondary')
+  // variant?: 'primary' | 'secondary';
+}
+
+/**
+ * Button Component
+ *
+ * A reusable button component with consistent styling.
+ *
+ * @param {ButtonProps} props - Component props, including standard button attributes.
+ * @returns {JSX.Element} The Button component.
+ */
+export default function Button({ children, className = '', ...props }: ButtonProps): JSX.Element {
+  // Base styles + primary variant styles (can be adapted)
+  const baseStyles = `
+    inline-flex items-center justify-center px-4 py-2 border border-transparent
+    text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2
+    focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800
+    transition ease-in-out duration-150 disabled:opacity-50 disabled:cursor-not-allowed
+  `;
+  // Example primary button styles
+  const primaryStyles = `
+    text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600
+  `;
+  // Example secondary button styles (add later if needed)
+  // const secondaryStyles = `
+  //   text-blue-700 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900 dark:hover:bg-blue-800
+  // `;
+
+  return (
+    <button
+      type="button" // Default to type="button" unless overridden
+      className={`${baseStyles} ${primaryStyles} ${className}`} // Combine base, variant, and custom classes
+      {...props} // Spread remaining props (like onClick, disabled, type)
+    >
+      {children}
+    </button>
+  );
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>CREATE</file_operation>
+      <file_path>client/src/components/Workspace.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the Workspace component, the primary area for users to
+ * input, edit, and execute SON JSON code. It includes a code editor,
+ * control buttons, and placeholder areas for displaying execution results
+ * and console output.
+ * </ai_info>
+ *
+ * @file client/src/components/Workspace.tsx
+ * @description Component providing the SON code editor, execution controls, and result/console display areas.
+ *
+ * Key features:
+ * - Integrates `react-simple-code-editor` for SON JSON input.
+ * - Manages editor content state using `useState`.
+ * - Includes "Execute" and "Save Method" buttons (placeholders for now).
+ * - Provides distinct panels for displaying execution results and console output.
+ * - Uses Tailwind CSS for layout (vertical flex column).
+ *
+ * @dependencies
+ * - React: `useState`.
+ * - react-simple-code-editor: For the code input area.
+ * - ./ui/Panel: Reusable panel component.
+ * - ./ui/Button: Reusable button component.
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - Execution, saving, and console logic will be implemented in subsequent steps.
+ * - Requires `react-simple-code-editor` to be installed.
+ * - Syntax highlighting for JSON is enabled.
+ */
+"use client";
+
+import React, { useState } from 'react';
+import Editor from 'react-simple-code-editor';
+import { highlight, languages } from 'prismjs/components/prism-core'; // Basic PrismJS
+import 'prismjs/components/prism-json'; // Load JSON language support
+import 'prismjs/themes/prism-tomorrow.css'; // Choose a theme (or import another)
+import Panel from './ui/Panel';
+import Button from './ui/Button';
+
+// Props interface (currently empty, can be expanded later)
+interface WorkspaceProps {
+  // Potentially add props later, e.g., to interact with SystemBrowser selection
+}
+
+/**
+ * Workspace Component
+ *
+ * Provides the main interaction area for writing and executing SON code.
+ * Includes an editor, control buttons, and output panels.
+ *
+ * @param {WorkspaceProps} props - Component props.
+ * @returns {JSX.Element} The Workspace component.
+ */
+export default function Workspace(props: WorkspaceProps): JSX.Element {
+  // State to hold the SON JSON code entered by the user
+  const [code, setCode] = useState<string>(
+    // Initial example code
+    '[\n  ["Transcript", "show:", "Hello from SON!"],\n  [1, "+", [2, "*", 3]]\n]'
+  );
+
+  // Placeholder handlers - functionality will be added later
+  const handleExecute = () => {
+    console.log("Execute button clicked. Code:", code);
+    alert("Execute functionality not yet implemented.");
+    // Step 15 will implement this
+  };
+
+  const handleSave = () => {
+    console.log("Save Method button clicked. Code:", code);
+    alert("Save Method functionality not yet implemented.");
+    // Step 19 will implement this
+  };
+
+  return (
+    // Use flex column layout to stack elements vertically
+    // Use h-full and overflow-hidden to manage space within the IDE panel
+    <div className="flex flex-col h-full p-2 space-y-2 bg-gray-50 dark:bg-gray-950 overflow-hidden">
+
+      {/* Code Editor Panel */}
+      <Panel title="SON Editor" className="flex-grow flex flex-col overflow-hidden">
+        {/* The editor itself, allow it to grow and scroll */}
+        <div className="flex-grow overflow-auto relative border border-gray-200 dark:border-gray-700 rounded">
+            <Editor
+              value={code}
+              onValueChange={newCode => setCode(newCode)}
+              highlight={code => highlight(code, languages.json, 'json')}
+              padding={10}
+              // Apply font-mono for code, match text size, ensure focus outline
+              textareaClassName="focus:outline-none"
+              // Use preClassName for consistent styling even with empty content
+              preClassName="min-h-full"
+              style={{
+                fontFamily: '"Fira code", "Fira Mono", monospace',
+                fontSize: 13,
+                backgroundColor: 'var(--editor-bg, #f8f8f8)', // Use CSS variable or default
+                color: 'var(--editor-fg, #333)', // Use CSS variable or default
+                // Ensure editor takes full height of its container
+                minHeight: '100%',
+              }}
+            />
+        </div>
+      </Panel>
+
+      {/* Control Buttons */}
+      <div className="flex-shrink-0 flex space-x-2">
+        <Button onClick={handleExecute}>Execute</Button>
+        <Button onClick={handleSave} /* Add disabled logic later if needed */ >
+          Save Method
+        </Button>
+        {/* Add UI for specifying class name/selector for saving later */}
+      </div>
+
+      {/* Results Panel */}
+      <Panel title="Result" className="flex-shrink-0 h-1/6 overflow-y-auto">
+        {/* Placeholder content */}
+        <pre className="text-sm whitespace-pre-wrap">Execution results will appear here...</pre>
+        {/* Actual result display logic (or error) will go here in Step 15 */}
+      </Panel>
+
+      {/* Console Output Panel */}
+      <Panel title="Console" className="flex-shrink-0 h-1/6 overflow-y-auto">
+        {/* Placeholder content */}
+        <pre className="text-sm whitespace-pre-wrap">Transcript output will appear here...</pre>
+        {/* Actual console output will go here in Step 18 */}
+      </Panel>
+
+    </div>
+  );
+}
+
+// Basic CSS variables for editor background/foreground (can be moved to globals.css)
+// This ensures basic visibility in light/dark mode if theme CSS isn't perfectly applied.
+const editorStyles = `
+  :root {
+    --editor-bg: #ffffff;
+    --editor-fg: #171717;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --editor-bg: #0f0f0f; /* Slightly off-black */
+      --editor-fg: #e0e0e0;
+    }
+  }
+`;
+
+// Inject minimal styles for editor variables if needed (consider placing in globals.css)
+if (typeof window !== 'undefined') { // Check if running in browser
+    const styleTag = document.createElement('style');
+    styleTag.textContent = editorStyles;
+    document.head.appendChild(styleTag);
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/components/IDE.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the main Integrated Development Environment (IDE) layout component.
+ * It structures the user interface into distinct areas for the System Browser and the Workspace,
+ * using Tailwind CSS for flexible layout management. This component acts as the primary
+ * container for the core interactive elements of the SON Environment. It has been updated
+ * to include the actual Workspace component.
+ * </ai_info>
+ *
+ * @file client/src/components/IDE.tsx
+ * @description Main layout component for the SON IDE interface.
+ *
+ * Key features:
+ * - Uses Tailwind CSS Flexbox to create a two-column layout.
+ * - Defines areas for the System Browser (left) and Workspace (right).
+ * - Renders the actual `SystemBrowser` and `Workspace` components. // Updated
+ * - Designed to fill the available vertical space within its parent container.
+ *
+ * @dependencies
+ * - React: Core library for component creation.
+ * - ./SystemBrowser: The component for browsing classes and methods.
+ * - ./Workspace: The component for editing and executing SON code. // Added
+ *
+ * @notes
+ * - Marked as a client component ("use client").
+ * - Layout proportions (e.g., `w-1/3`, `w-2/3`) can be adjusted as needed.
+ */
+"use client";
+
+import React from 'react';
+import SystemBrowser from './SystemBrowser'; // Import the SystemBrowser component
+import Workspace from './Workspace'; // Import the Workspace component
+
+/**
+ * IDE Component
+ *
+ * Renders the main structural layout for the SON Environment's IDE,
+ * dividing the space into sections for system browsing and code workspace.
+ *
+ * @returns {JSX.Element} The IDE layout structure.
+ */
+export default function IDE(): JSX.Element {
+  return (
+    // Flex container to manage the overall layout, allowing children to grow
+    // Takes full height of its container (e.g., the main content area of the page)
+    // Added overflow-hidden to main container to prevent double scrollbars
+    <div className="flex flex-grow h-full border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden shadow-md">
+
+      {/* Left Panel: System Browser Area */}
+      {/* Ensure this container allows SystemBrowser to control its own scrolling if needed */}
+      <div className="w-1/3 border-r border-gray-300 dark:border-gray-700 flex flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
+        {/* Render the actual SystemBrowser component */}
+        <SystemBrowser />
+      </div>
+
+      {/* Right Panel: Workspace Area */}
+      {/* Use flex flex-col and overflow-hidden to manage workspace layout */}
+      <div className="w-2/3 flex flex-col overflow-hidden bg-white dark:bg-gray-950">
+        {/* Render the actual Workspace component */}
+        <Workspace />
+      </div>
+    </div>
+  );
+}
+]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>
+Use code with caution.
+Xml
+STEP 14 COMPLETE. Here's what I did and why:
+Created client/src/components/ui/Button.tsx: Added a reusable Button component using Tailwind for consistent styling, including basic hover, focus, and disabled states.
+Created client/src/components/Workspace.tsx: Implemented the main Workspace component structure using Flexbox and the Panel component. Integrated react-simple-code-editor with state management (useState) for the SON JSON input. Added placeholder "Execute" and "Save Method" buttons using the new Button component. Included placeholder panels for "Results" and "Console Output". Enabled basic JSON syntax highlighting using PrismJS.
+Updated client/src/components/IDE.tsx: Replaced the placeholder div in the right panel with the actual <Workspace /> component, integrating it into the main IDE layout.
+USER INSTRUCTIONS: Please do the following:
+Install Dependencies: Run the following command in the client directory to install the code editor library and PrismJS types:
+cd client
+bun add react-simple-code-editor prismjs
+bun add @types/prismjs --dev
+cd ..
+Use code with caution.
+Bash
+Run the Application: Start both the backend and frontend servers if they are not already running:
+In son-environment/server: bun run dev
+In son-environment/client: bun run dev
+Verify: Open the application in your browser (usually http://localhost:3000). You should now see the Workspace area populated with a code editor (containing example SON JSON), Execute/Save buttons, and placeholder panels for Results and Console below the editor.

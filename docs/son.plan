@@ -159,7 +159,7 @@ Okay, let's break down the development of the SON Environment application into a
         *   `son-environment/client/src/components/SystemBrowser.tsx`: Render `CodeViewer`, passing `selectedClassName` and `selectedMethodSelector`.
     *   **Step Dependencies**: Step 7, Step 12.
 
--   [ ] **Step 14: Implement Workspace - Editor and Basic Layout**
+-   [x] **Step 14: Implement Workspace - Editor and Basic Layout**
     *   **Task**: Create the `Workspace` component structure with areas for the code editor, control buttons, results display, and console output. Integrate a code editor component for SON JSON input.
     *   **Files**:
         *   `son-environment/client/src/components/ui/Button.tsx`: (Optional) Create a reusable Button component.
@@ -168,7 +168,7 @@ Okay, let's break down the development of the SON Environment application into a
     *   **Step Dependencies**: Step 10.
     *   **User Instructions**: May need to install a code editor library: `bun add react-simple-code-editor` (or other chosen library).
 
--   [ ] **Step 15: Implement Workspace - Code Execution**
+-   [x] **Step 15: Implement Workspace - Code Execution**
     *   **Task**: Wire up the "Execute" button in the `Workspace`. On click, parse the JSON from the editor, retrieve the current `$env` from `SonEnvironmentContext`, call the `evaluate` function from the SON interpreter, and display the result or error message in the results area.
     *   **Files**:
         *   `son-environment/client/src/components/Workspace.tsx`: Implement the `handleExecute` function. Use `try...catch` around `JSON.parse` and `evaluate`. Update `useState` variables for `result` and `error` display. Access `$env` using `useContext(SonEnvironmentContext)`. Render the result/error state in the designated panel.
@@ -176,7 +176,7 @@ Okay, let's break down the development of the SON Environment application into a
 
 ## Phase 4: Advanced Features and Integration
 
--   [ ] **Step 16: Enhance SON Interpreter - Assignments, Keywords, Cascades**
+-   [x] **Step 16: Enhance SON Interpreter - Assignments, Keywords, Cascades**
     *   **Task**: Extend the `evaluate` function in the SON interpreter to handle assignments (`["var:", expr]`), keyword message sends (`["receiver", "selector:arg:", arg1, ...]`), and cascades (`["receiver", "cascade:", [msg1, ...]]`). Update `SonEnvironment` if needed for assignment scope.
     *   **Files**:
         *   `son-environment/client/src/lib/son/interpreter.ts`: Add logic branches to `evaluate` for these constructs. Refine `lookupMethod` to handle keyword selectors. Update tests.
