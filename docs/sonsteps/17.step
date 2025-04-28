@@ -1,0 +1,1025 @@
+Okay, I will proceed with Step 17: Enhance SON Interpreter - Blocks and Returns (Non-Local).
+This involves updating the interpreter to handle the creation and execution of block closures, including capturing lexical scope, and implementing local and non-local return semantics using custom errors.
+Here's what I did and why:
+File: client/src/lib/son/types.ts
+Operation: UPDATE
+Reasoning: Defined the SonBlock interface to represent block closures, including their arguments, body, captured environment (lexicalScope), and the environment of the method that defined them (homeContext) for handling non-local returns.
+File: client/src/lib/son/errors.ts
+Operation: UPDATE
+Reasoning: Ensured LocalReturnError and NonLocalReturnError are correctly defined. Added a homeContext property to NonLocalReturnError to carry the target environment for the non-local return, simplifying the catching mechanism.
+File: client/src/lib/son/environment.ts
+Operation: UPDATE
+Reasoning: Added an optional isMethodContext flag and a reference to the receiver (methodSelf) to environment instances created specifically for method execution. This allows the interpreter to identify method contexts for handling returns correctly and implement implicit self returns. Added placeholders/structure for method definition/lookup, anticipating future steps.
+File: client/src/lib/son/interpreter.ts
+Operation: UPDATE
+Reasoning:
+Implemented the [["args"], "=>:", [body...]] special form to create SonBlock instances, capturing the current lexical scope (env) and identifying the home method context.
+Implemented the ["^", expr] special form to evaluate the expression and throw LocalReturnError or NonLocalReturnError based on whether the current environment is marked as a method context.
+Refactored the core logic to separate generic message sending (sendMessage) from the main evaluate loop.
+Implemented block execution logic within sendMessage for the value:, value:value:, etc., selectors when the receiver is a SonBlock. This includes creating a new environment, binding arguments, and wrapping the body evaluation in a try...catch to handle returns (propagating non-local returns).
+Modified the sequence evaluation loop to catch and propagate return errors.
+Added placeholder logic for method execution context setup within sendMessage (specifically catching return errors), preparing for actual SON method implementation later. The lookupAndSend function now focuses purely on JS interop.
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/lib/son/types.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the core TypeScript types used throughout the SON (Smalltalk Object Notation)
+ * interpreter and environment. It establishes the structure for SON values, objects, symbols,
+ * arrays, block closures, and the execution environment.
+ * </ai_info>
+ *
+ * @file client/src/lib/son/types.ts
+ * @description Core TypeScript types for the SON interpreter.
+ */
+
+/**
+ * Represents a Smalltalk-style symbol in SON.
+ */
+export interface SonSymbol {
+    '#': string;
+}
+
+/**
+ * Represents a standard JSON array, used for sequences, message sends, etc. in SON.
+ */
+export type SonArray = SonValue[];
+
+/**
+ * Represents a standard JSON object, potentially used for SON objects (though structure may vary).
+ * Also used for the Symbol literal format.
+ */
+export type SonObject = { [key: string]: SonValue } | SonSymbol;
+
+
+/**
+ * Represents the execution environment or scope in which SON code is evaluated.
+ * It provides methods for variable lookup (`get`), assignment (`set`),
+ * and potentially method definition/lookup later.
+ */
+export interface ISonEnvironment {
+    /**
+     * Retrieves the value of a variable from the environment or its ancestors.
+     * @param name - The name of the variable to retrieve (without the leading '$').
+     * @returns The value of the variable.
+     * @throws {VariableNotFoundError} If the variable is not found in the current or any parent environment.
+     */
+    get(name: string): SonValue;
+
+    /**
+     * Sets the value of a variable in the current environment scope.
+     * @param name - The name of the variable to set (without the leading '$').
+     * @param value - The value to assign to the variable.
+     */
+    set(name: string, value: SonValue): void;
+
+    /**
+     * Creates a new child environment that inherits from this environment.
+     * Used for creating new lexical scopes (e.g., for block or method execution).
+     * @param options - Optional configuration for the child environment.
+     * @param options.isMethodContext - Mark this environment as representing a method's execution context.
+     * @param options.methodSelf - Reference to the 'self' object within a method context.
+     * @returns A new SonEnvironment instance whose parent is the current environment.
+     */
+    createChild(options?: { isMethodContext?: boolean; methodSelf?: SonValue }): ISonEnvironment;
+
+    /** Checks if this environment represents the top-level context of a method execution. */
+    isMethodContext(): boolean;
+
+    /** Gets the receiver ('self') of the method if this is a method context. */
+    getMethodSelf(): SonValue | undefined;
+
+    /** Gets the parent environment. */
+    getParent(): ISonEnvironment | null;
+
+
+    // TODO: Add methods for method definition and lookup as interpreter evolves
+    /** Defines a method within this environment's scope (e.g., for a class definition). */
+    defineMethod?(selector: string, argNames: string[], body: SonValue): void;
+
+    /** Looks up a method implementation based on the selector for a given receiver type/class. */
+    lookupMethod?(receiver: SonValue, selector: string): SonMethodImplementation | null; // Returns method implementation details
+
+    /** Looks up a method definition directly within this environment's scope. */
+    lookupMethodLocally?(selector: string): SonMethodImplementation | null;
+}
+
+
+/**
+ * Represents a block closure in SON.
+ */
+export interface SonBlock {
+    /** Distinguisher for type guards */
+    __type: 'SonBlock';
+    /** The names of the block arguments. */
+    argNames: string[];
+    /** The SON code array representing the block's body. */
+    body: SonArray;
+    /** The lexical environment captured when the block was defined. */
+    lexicalScope: ISonEnvironment;
+    /** The environment of the method context in which the block was defined. Needed for non-local returns. */
+    homeContext: ISonEnvironment;
+}
+
+// Forward declaration to avoid circular dependency issues if types become complex
+export type SonValue =
+    | number
+    | string
+    | boolean
+    | null
+    | SonSymbol // e.g., { '#': 'mySymbol' }
+    | SonObject // e.g., { 'key': 'value' } or potentially SON objects later
+    | SonArray // e.g., [1, '+', 2] or ['stmt1', 'stmt2']
+    | SonBlock; // Block closure object
+
+
+// Interface for Method implementations (represents the data needed to execute a method)
+export interface SonMethodImplementation {
+    __type: 'SonMethodImplementation';
+    argNames: string[];
+    body: SonValue; // Typically SonArray representing the statements
+    // Potentially store owner class/env here if needed
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/lib/son/errors.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines custom error classes used by the SON interpreter.
+ * These specific error types allow for more granular error handling and reporting
+ * compared to using generic `Error` objects. Includes errors for runtime issues
+ * and special control flow exceptions for returns.
+ * </ai_info>
+ *
+ * @file client/src/lib/son/errors.ts
+ * @description Custom error classes for the SON interpreter runtime and control flow.
+ */
+
+import { ISonEnvironment } from "./types"; // Import ISonEnvironment
+
+
+/**
+ * Base class for all custom runtime errors originating from the SON interpreter.
+ * These represent errors that should typically halt execution and be reported.
+ */
+export class SonError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'SonError';
+        // Maintains proper stack trace in V8 environments (Node, Chrome)
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, SonError);
+        }
+    }
+}
+
+/**
+ * Error thrown when a variable lookup fails (variable not found in any scope).
+ */
+export class VariableNotFoundError extends SonError {
+    public variableName: string;
+
+    constructor(variableName: string) {
+        super(`Variable not found: ${variableName}`);
+        this.name = 'VariableNotFoundError';
+        this.variableName = variableName;
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, VariableNotFoundError);
+        }
+    }
+}
+
+/**
+ * Error thrown when an object does not understand a message (method lookup fails).
+ */
+export class MessageNotUnderstoodError extends SonError {
+    public receiver: any; // Type might become more specific later (SonValue)
+    public selector: string;
+
+    constructor(receiver: any, selector: string) {
+        // Attempt to provide a better string representation of the receiver
+        let receiverStr = 'object';
+        try {
+            if (receiver === null) receiverStr = 'null';
+            else if (receiver && receiver.__type === 'SonBlock') receiverStr = 'a BlockClosure';
+            else if (typeof receiver === 'object') receiverStr = receiver.constructor?.name ?? JSON.stringify(receiver).substring(0, 50) + '...';
+            else receiverStr = String(receiver);
+        } catch (e) { /* Ignore errors during stringification */ }
+
+        super(`Message not understood: ${receiverStr} does not understand #${selector}`);
+        this.name = 'MessageNotUnderstoodError';
+        this.receiver = receiver; // Store the actual receiver for potential debugging
+        this.selector = selector;
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, MessageNotUnderstoodError);
+        }
+    }
+}
+
+/**
+ * Error thrown when a message is sent with the wrong number or type of arguments.
+ */
+export class ArgumentError extends SonError {
+    constructor(message: string) {
+        super(`Argument error: ${message}`);
+        this.name = 'ArgumentError';
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, ArgumentError);
+        }
+    }
+}
+
+// --- Control Flow Errors ---
+// These are used internally by the interpreter to signal return statements.
+// They do not typically represent user-facing errors unless uncaught at the top level.
+// They intentionally do NOT inherit from SonError.
+
+/**
+ * Error used internally to signal a local return (`^ expr`) from a method context.
+ * Should be caught by the method execution frame.
+ */
+export class LocalReturnError extends Error {
+    public value: any; // SonValue
+    constructor(value: any) {
+        super("Local return signal"); // Message not typically user-facing
+        this.name = 'LocalReturnError';
+        this.value = value;
+        // No stack trace capture needed for control flow exceptions ideally
+    }
+}
+
+/**
+ * Error used internally to signal a non-local return (`^ expr`) from a block context.
+ * Should be caught by the defining method's execution frame (the 'home context').
+ */
+export class NonLocalReturnError extends Error {
+    public value: any; // SonValue
+    public homeContext: ISonEnvironment; // The target method context to return to
+
+    constructor(value: any, homeContext: ISonEnvironment) {
+        super("Non-local return signal"); // Message not typically user-facing
+        this.name = 'NonLocalReturnError';
+        this.value = value;
+        this.homeContext = homeContext;
+        // No stack trace capture needed for control flow exceptions ideally
+    }
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/lib/son/environment.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file implements the `SonEnvironment` class, which represents the execution
+ * context (scope) for the SON interpreter. It handles variable storage, lookup
+ * (with lexical scoping through parent environments), and assignment.
+ * It now includes flags/properties (`_isMethodContext`, `_methodSelf`) to identify
+ * method contexts, which is crucial for handling return semantics (`^`).
+ * Placeholder methods for method definition/lookup are included.
+ * </ai_info>
+ *
+ * @file client/src/lib/son/environment.ts
+ * @description Manages the $env execution context for the SON interpreter.
+ *
+ * Key features:
+ * - Stores variables in a Map.
+ * - Supports prototypical inheritance for lexical scoping via a `parent` reference.
+ * - `get` method searches current and parent scopes.
+ * - `set` method modifies the current scope only.
+ * - `createChild` method creates nested scopes.
+ * - Identifies method contexts via `isMethodContext` flag.
+ * - Stores method receiver (`self`) in `methodSelf` property for method contexts.
+ */
+
+import { ISonEnvironment, SonValue, SonMethodImplementation } from './types'; // Added SonMethodImplementation
+import { VariableNotFoundError } from './errors';
+
+/**
+ * Implements the ISonEnvironment interface to manage lexical scopes.
+ */
+export class SonEnvironment implements ISonEnvironment {
+    private variables: Map<string, SonValue>;
+    private readonly parent: ISonEnvironment | null;
+    private readonly _isMethodContext: boolean;
+    private readonly _methodSelf: SonValue | undefined; // Store 'self' for method contexts
+
+    // Placeholder for methods defined directly in this scope (e.g., class methods)
+    private methods: Map<string, SonMethodImplementation> = new Map();
+
+
+    /**
+     * Creates a new SonEnvironment instance.
+     * @param parent - The parent environment for lexical scoping, or null for the root environment.
+     * @param options - Optional configuration for the environment.
+     * @param options.isMethodContext - Mark this environment as representing a method's execution context.
+     * @param options.methodSelf - Reference to the 'self' object within a method context.
+     */
+    constructor(parent: ISonEnvironment | null = null, options?: { isMethodContext?: boolean; methodSelf?: SonValue }) {
+        this.variables = new Map<string, SonValue>();
+        this.parent = parent;
+        this._isMethodContext = options?.isMethodContext ?? false;
+        this._methodSelf = options?.methodSelf;
+
+        // Automatically define 'self' if this is a method context
+        if (this._isMethodContext && this._methodSelf !== undefined) {
+            this.variables.set('self', this._methodSelf);
+        }
+        // Define 'super' later if needed
+    }
+
+    /**
+     * Retrieves the value of a variable from the environment or its ancestors.
+     * Follows the prototype chain (parent environments) if not found locally.
+     * @param name - The name of the variable to retrieve (without the leading '$').
+     * @returns The value of the variable.
+     * @throws {VariableNotFoundError} If the variable is not found in the current or any parent environment.
+     */
+    get(name: string): SonValue {
+        if (this.variables.has(name)) {
+            return this.variables.get(name)!; // Use non-null assertion as `has` confirms existence
+        }
+
+        if (this.parent !== null) {
+            // Delegate lookup to the parent environment
+            return this.parent.get(name);
+        }
+
+        // Reached the root environment and still not found
+        throw new VariableNotFoundError(name);
+    }
+
+    /**
+     * Sets the value of a variable in the *current* environment scope.
+     * Does not delegate to parent environments; assignment always occurs locally.
+     * @param name - The name of the variable to set (without the leading '$').
+     * @param value - The value to assign to the variable.
+     */
+    set(name: string, value: SonValue): void {
+        // Smalltalk assignment semantics: assign in the current scope.
+        this.variables.set(name, value);
+    }
+
+    /**
+     * Creates a new child environment that inherits from this environment.
+     * The new environment's parent will be the current environment instance.
+     * @param options - Optional configuration for the child environment.
+     * @param options.isMethodContext - Mark this environment as representing a method's execution context.
+     * @param options.methodSelf - Reference to the 'self' object within a method context.
+     * @returns A new SonEnvironment instance linked to the current one.
+     */
+    createChild(options?: { isMethodContext?: boolean; methodSelf?: SonValue }): ISonEnvironment {
+        return new SonEnvironment(this, options);
+    }
+
+    /**
+     * Checks if this environment represents the top-level context of a method execution.
+     * @returns True if this is a method context, false otherwise.
+     */
+    isMethodContext(): boolean {
+        return this._isMethodContext;
+    }
+
+    /**
+     * Gets the receiver ('self') of the method if this is a method context.
+     * @returns The receiver ('self') object or undefined if not a method context.
+     */
+    getMethodSelf(): SonValue | undefined {
+        return this._methodSelf;
+    }
+
+     /**
+     * Gets the parent environment.
+     * @returns The parent ISonEnvironment or null.
+     */
+    getParent(): ISonEnvironment | null {
+        return this.parent;
+    }
+
+
+    /**
+     * Utility method to check if a variable exists in the current scope only.
+     * @param name The variable name.
+     * @returns True if the variable exists locally, false otherwise.
+     */
+    hasLocal(name: string): boolean {
+        return this.variables.has(name);
+    }
+
+    /**
+     * Utility method for debugging: Gets a string representation of the local variables
+     * and optionally parent variables recursively.
+     * @param depth - How many parent levels to dump (0 for local only).
+     * @returns A string listing variables in scope.
+     */
+    dumpScope(depth: number = 0): string {
+        let str = `{ (MethodCtx: ${this._isMethodContext}) `;
+        this.variables.forEach((value, key) => {
+             try {
+                 // Basic string representation for blocks
+                 if (value && typeof value === 'object' && (value as any).__type === 'SonBlock') {
+                     str += `${key}: [BlockClosure], `;
+                 } else {
+                     str += `${key}: ${JSON.stringify(value)}, `;
+                 }
+             } catch (e) {
+                 str += `${key}: [Unserializable], `; // Handle non-JSON values
+             }
+        });
+        str = str.length > 25 ? str.slice(0, -2) + ' }' : '{ }'; // Adjust length check
+
+        if (depth > 0 && this.parent instanceof SonEnvironment) {
+             str += `\n  parent: ${this.parent.dumpScope(depth - 1)}`;
+        } else if (this.parent) {
+             str += `\n  parent: [Non-SonEnvironment Parent]`;
+        }
+        return str;
+    }
+
+
+    // --- Method Handling ---
+
+    /**
+     * Defines a method directly within this environment's scope (e.g., in a class definition).
+     * @param selector - The method selector string.
+     * @param argNames - An array of argument names.
+     * @param body - The SON code representing the method body.
+     */
+    defineMethod(selector: string, argNames: string[], body: SonValue): void {
+        console.log(`Environment: Defining method #${selector} with args ${JSON.stringify(argNames)} in scope ${this._isMethodContext ? 'Method' : 'Object/Class'}`);
+        const implementation: SonMethodImplementation = {
+             __type: 'SonMethodImplementation',
+             argNames,
+             body
+        };
+        this.methods.set(selector, implementation);
+    }
+
+    /**
+     * Looks up a method implementation within this environment or its parent chain (for class hierarchy).
+     * Placeholder for actual class-based lookup. Currently only checks local methods map.
+     *
+     * @param receiver - The object receiving the message (needed to determine class).
+     * @param selector - The method selector.
+     * @returns The method implementation details or null if not found.
+     */
+    lookupMethod(receiver: SonValue, selector: string): SonMethodImplementation | null {
+        // TODO: Implement real class-based lookup.
+        // 1. Get receiver's class (how is class represented? TBD)
+        // 2. Check class's methods (using lookupMethodLocally on class env?)
+        // 3. Check superclass hierarchy.
+
+        // Placeholder: check only locally defined methods for now.
+        return this.lookupMethodLocally(selector);
+    }
+
+    /**
+     * Looks up a method definition directly within this environment's scope (e.g., on a class).
+     * @param selector - The method selector.
+     * @returns The method implementation details or null if not found locally.
+     */
+    lookupMethodLocally(selector: string): SonMethodImplementation | null {
+         return this.methods.get(selector) || null;
+    }
+}
+]]></file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/lib/son/interpreter.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file contains the core evaluation logic for SON (Smalltalk Object Notation) JSON.
+ * The `evaluate` function recursively traverses the SON Abstract Syntax Tree (AST) represented
+ * as JSON, interpreting the different language constructs according to the specification.
+ * It now handles block closures (`=>:`), local and non-local returns (`^`), assignments,
+ * cascades, sequences, and message sends. Message sending logic is partially refactored
+ * to handle different receiver types (JS objects, Blocks, future SON objects).
+ * </ai_info>
+ *
+ * @file client/src/lib/son/interpreter.ts
+ * @description Core evaluation logic for SON JSON, including blocks and returns.
+ *
+ * Key features:
+ * - Recursive `evaluate` function for SON nodes.
+ * - Handles literals, symbols, variables.
+ * - Handles sequences, assignment, cascades.
+ * - Handles block closure definition (`=>:`) capturing lexical scope and home context.
+ * - Handles return statements (`^`) throwing `LocalReturnError` or `NonLocalReturnError`.
+ * - Refactored message sending via `sendMessage`.
+ * - `sendMessage` handles block execution (`value:`, `value:value:`, etc.).
+ * - `sendMessage` includes basic JS interop via `lookupAndSendJS`.
+ * - Includes error handling and propagation for returns.
+ */
+
+import {
+    ISonEnvironment,
+    SonValue,
+    SonSymbol,
+    SonArray,
+    SonObject,
+    SonBlock, // Import SonBlock type
+    SonMethodImplementation,
+} from './types';
+import {
+    VariableNotFoundError,
+    MessageNotUnderstoodError,
+    ArgumentError,
+    SonError,
+    LocalReturnError, // Import return errors
+    NonLocalReturnError,
+} from './errors';
+
+
+// --- Type Guards ---
+
+/** Checks if a value is a SON symbol literal. */
+function isSonSymbol(value: any): value is SonSymbol {
+    return typeof value === 'object' && value !== null && '#' in value && typeof value['#'] === 'string';
+}
+
+/** Checks if a value is a SON block closure object. */
+function isSonBlock(value: any): value is SonBlock {
+    return typeof value === 'object' && value !== null && value.__type === 'SonBlock';
+}
+
+// --- Helper Functions ---
+
+/**
+ * Finds the environment corresponding to the method context in which a block was defined.
+ * Traverses the parent chain from the block's lexical scope.
+ * @param startEnv The initial environment (usually the block's lexical scope).
+ * @returns The home method context environment, or null if not found (shouldn't happen in valid execution).
+ */
+function findHomeContext(startEnv: ISonEnvironment): ISonEnvironment | null {
+    let current: ISonEnvironment | null = startEnv;
+    while (current) {
+        if (current.isMethodContext()) {
+            return current;
+        }
+        current = current.getParent();
+    }
+    // If we reach here, something is wrong - block defined outside a method context?
+    console.error("Could not find home context for block defined in scope:", startEnv);
+    return null; // Or throw? For now, return null, handle downstream.
+}
+
+
+/**
+ * Handles message sending for basic JavaScript interop.
+ * Looks for a JS property on the receiver and calls it if it's a function.
+ *
+ * @param receiver The evaluated receiver object (must be a JS primitive or object).
+ * @param selector The message selector string.
+ * @param args The evaluated arguments array.
+ * @returns The result of the JS function call.
+ * @throws {MessageNotUnderstoodError} If the receiver is null/undefined or doesn't have a function property matching the selector.
+ * @throws {ArgumentError} If a keyword selector seems to have the wrong arity (basic check).
+ * @throws Any error thrown by the executed JS function.
+ */
+function lookupAndSendJS(receiver: any, selector: string, args: SonValue[]): SonValue {
+    if (receiver === null || receiver === undefined) {
+        throw new MessageNotUnderstoodError(receiver, selector);
+    }
+
+    const method = (receiver as any)[selector];
+
+    if (typeof method === 'function') {
+        // Basic arity check for keyword messages
+        const isKeyword = selector.includes(':') && selector.endsWith(':');
+        if (isKeyword) {
+            const expectedArgs = selector.split(':').filter(part => part.length > 0).length;
+            if (expectedArgs !== args.length) {
+                 console.warn(`Arity mismatch for JS keyword selector #${selector}: expected ${expectedArgs}, got ${args.length} args.`);
+                 // Optionally throw:
+                 // throw new ArgumentError(`JS Selector #${selector} expects ${expectedArgs} arguments, but received ${args.length}.`);
+            }
+        }
+        // No reliable arity check for non-keyword JS functions.
+
+        try {
+            // Call the JS function, setting 'this' to the receiver
+            return method.apply(receiver, args);
+        } catch (e: any) {
+            console.error(`Error during JS method execution for #${selector} on ${typeof receiver}:`, e);
+            // Don't wrap JS errors in SonError, let them propagate as is unless specific handling needed
+            throw e;
+        }
+    } else {
+        throw new MessageNotUnderstoodError(receiver, selector);
+    }
+}
+
+/**
+ * Central function for sending a message (selector + arguments) to a receiver.
+ * Dispatches to appropriate handlers based on receiver type (Block, SON Object, JS Object).
+ *
+ * @param receiver The evaluated receiver value.
+ * @param selector The message selector string.
+ * @param args The evaluated arguments array.
+ * @param env The current execution environment.
+ * @returns The result of the message send.
+ * @throws {MessageNotUnderstoodError} If the receiver doesn't understand the message.
+ * @throws {ArgumentError} If the message is sent with incorrect arguments (e.g., arity mismatch).
+ * @throws {LocalReturnError | NonLocalReturnError} If the message execution triggers a return.
+ */
+function sendMessage(receiver: SonValue, selector: string, args: SonValue[], env: ISonEnvironment): SonValue {
+    // 1. Handle Block Execution (value:, value:value:, etc.)
+    if (isSonBlock(receiver)) {
+        // Check if the selector matches the 'value*' pattern
+        if (selector.startsWith('value') && (selector === 'value' || selector.match(/^value:$/) || selector.match(/^value:(value:)+$/))) {
+            const expectedArgs = selector === 'value' ? 0 : selector.split(':').length - 1;
+            if (args.length !== expectedArgs) {
+                throw new ArgumentError(`Block ${selector} expects ${expectedArgs} arguments, but received ${args.length}.`);
+            }
+
+            // Create a new environment for block execution, inheriting from the block's captured scope
+            const blockEnv = receiver.lexicalScope.createChild(); // Not a method context
+
+            // Bind arguments to names in the new environment
+            if (receiver.argNames.length !== args.length) {
+                 throw new ArgumentError(`Block definition expected ${receiver.argNames.length} arguments, but received ${args.length} for ${selector}.`);
+            }
+            for (let i = 0; i < receiver.argNames.length; i++) {
+                blockEnv.set(receiver.argNames[i], args[i]);
+            }
+
+            // Evaluate the block body within the new environment
+            console.debug("Executing block body:", JSON.stringify(receiver.body), "in env:", blockEnv.dumpScope());
+            try {
+                // Blocks evaluate as sequences, result is the last statement's value
+                 let blockResult: SonValue = null; // Default result if body is empty
+                 if(Array.isArray(receiver.body)) {
+                    for (let i = 0; i < receiver.body.length; i++) {
+                        blockResult = evaluate(receiver.body[i], blockEnv);
+                    }
+                 } else {
+                     // Should block body always be an array? Spec implies yes.
+                     throw new Error("Invalid block body structure: expected an array.");
+                 }
+
+                // Implicit return of the last statement's value
+                return blockResult;
+            } catch (e) {
+                 if (e instanceof NonLocalReturnError) {
+                    // Non-local return from the block, check if it targets the block's home context
+                     if (e.homeContext === receiver.homeContext) {
+                         // Propagate the non-local return up
+                         console.debug("Propagating non-local return from block:", e.value);
+                         throw e;
+                     } else {
+                         // This should not happen if homeContext is correctly identified
+                         console.error("Non-local return error encountered with mismatched home context!", e);
+                         throw new Error("Internal error: Non-local return target mismatch.");
+                     }
+                } else if (e instanceof LocalReturnError) {
+                    // Local return from within a block's execution? This implies ^ inside the block
+                    // but not targeting the method context - which is what NonLocalReturnError handles.
+                    // Reaching here might mean ^ was used outside a method context? Or logic error.
+                    console.error("LocalReturnError caught unexpectedly during block execution:", e);
+                    throw new SonError("Cannot execute local return (^) from this context.");
+                } else {
+                    // Re-throw other errors (SyntaxError, SonError, JS errors)
+                    throw e;
+                }
+            }
+        } else {
+            // Block doesn't understand other messages
+            throw new MessageNotUnderstoodError(receiver, selector);
+        }
+    }
+
+    // 2. Handle SON Object Method Lookup (Placeholder)
+    // TODO: Implement lookup based on receiver's class
+    // let methodImpl: SonMethodImplementation | null = env.lookupMethod(receiver, selector);
+    // if (methodImpl) {
+    //     // --- Method Execution Placeholder ---
+    //     console.debug(`Executing SON method #${selector} on`, receiver);
+    //     const methodEnv = env.createChild({ isMethodContext: true, methodSelf: receiver }); // Env specific to this method call
+    //
+    //     // Bind args...
+    //     if (methodImpl.argNames.length !== args.length) {
+    //         throw new ArgumentError(`Method #${selector} expects ${methodImpl.argNames.length} arguments, but received ${args.length}.`);
+    //     }
+    //     for (let i = 0; i < methodImpl.argNames.length; i++) {
+    //         methodEnv.set(methodImpl.argNames[i], args[i]);
+    //     }
+    //
+    //     try {
+    //         // Evaluate the method body in the method's environment
+    //         const result = evaluate(methodImpl.body, methodEnv);
+    //         // Implicit return of self if no explicit ^ occurred
+    //         return result; // This isn't right yet - need to return self implicitly
+    //     } catch (e) {
+    //         if (e instanceof LocalReturnError || e instanceof NonLocalReturnError) {
+    //             // Method context catches both local and non-local returns originating
+    //             // from its execution (directly or from nested blocks).
+    //             console.debug(`Method #${selector} caught return:`, e.value);
+    //             return e.value;
+    //         } else {
+    //             // Propagate other errors
+    //             throw e;
+    //         }
+    //     }
+    //     // --- End Method Execution Placeholder ---
+    // }
+
+    // 3. Handle JavaScript Interoperability (using the simple JS lookup)
+    try {
+        // Delegate to basic JS property/method call
+        return lookupAndSendJS(receiver, selector, args);
+    } catch (e) {
+        if (e instanceof MessageNotUnderstoodError) {
+            // If JS interop failed, and we didn't find a SON method (placeholder above),
+            // then it's truly not understood.
+            throw e; // Re-throw the original MNU error
+        } else {
+            // Propagate other JS errors
+            throw e;
+        }
+    }
+
+    // 4. If no handler found
+    // throw new MessageNotUnderstoodError(receiver, selector); // Covered by JS interop catch block
+}
+
+
+// --- Core Evaluation Function ---
+
+/**
+ * Evaluates a SON node within a given environment.
+ *
+ * @param node The SON node (JSON value) to evaluate.
+ * @param env The current execution environment (provides scope).
+ * @returns The result of evaluating the node.
+ * @throws {SonError} Or subclasses for runtime errors.
+ * @throws {LocalReturnError | NonLocalReturnError} For control flow.
+ * @throws {Error} For syntax errors or unexpected issues.
+ */
+export function evaluate(node: SonValue, env: ISonEnvironment): SonValue {
+
+    // 1. Handle Literals and Variables
+    if (typeof node === 'number' || typeof node === 'boolean' || node === null) {
+        return node;
+    }
+    if (typeof node === 'string') {
+        if (node.startsWith('$')) {
+            const varName = node.substring(1);
+            if (!varName) throw new Error("Invalid variable name: '$'");
+            if (varName === 'env') return env; // Allow introspection
+            return env.get(varName); // Throws VariableNotFoundError if not found
+        }
+        return node; // String literal
+    }
+    if (isSonSymbol(node)) {
+        return node; // Return symbol object
+    }
+    if (isSonBlock(node)) {
+         // If a block itself is evaluated (e.g. just `[[]=>:[]]`), return it.
+         return node;
+    }
+
+
+    // 2. Handle Arrays (Special Forms, Sequences, Message Sends)
+    if (Array.isArray(node)) {
+        const sonArray = node as SonArray;
+        if (sonArray.length === 0) {
+            return null; // Empty sequence evaluates to null
+        }
+
+        const first = sonArray[0];
+
+        // --- Special Forms ---
+
+        // Return Statement: ["^", expr]
+        if (first === '^') {
+            if (sonArray.length !== 2) {
+                throw new ArgumentError("Return statement ('^') requires exactly one argument.");
+            }
+            const value = evaluate(sonArray[1], env);
+            const homeCtx = findHomeContext(env);
+
+            if (!homeCtx) {
+                 // Cannot return if not inside a method context (directly or via block)
+                 throw new SonError("Cannot return ('^') from outside a method context.");
+            }
+
+            if (env.isMethodContext()) {
+                 // Inside the primary method context, perform a local return
+                 console.debug("Local return:", value);
+                 throw new LocalReturnError(value);
+            } else {
+                 // Inside a block, perform a non-local return targeting the home method context
+                 console.debug("Non-local return:", value, "to context:", homeCtx);
+                 throw new NonLocalReturnError(value, homeCtx);
+            }
+        }
+
+        // Assignment: ["var:", expr] (colon at end, not cascade: or =>:)
+        if (sonArray.length === 2 && typeof first === 'string' && first.endsWith(':') && first.length > 1 && first !== 'cascade:' && first !== '=>:') {
+            const varName = first.slice(0, -1);
+            const value = evaluate(sonArray[1], env);
+            env.set(varName, value);
+            return value; // Assignment returns the assigned value
+        }
+
+         // Block Closure Definition: [["argNames"], "=>:", [body...]]
+         if (sonArray.length === 3 && Array.isArray(first) && second === '=>:' && Array.isArray(third)) {
+             const argNodes = first as SonArray;
+             const body = third as SonArray;
+
+             // Validate argument names
+             const argNames = argNodes.map(argNode => {
+                 if (typeof argNode !== 'string') {
+                     throw new ArgumentError("Block argument names must be strings.");
+                 }
+                 return argNode;
+             });
+
+             const homeCtx = findHomeContext(env);
+             if (!homeCtx) {
+                 // This implies a block is being defined outside of any method context.
+                 // Smalltalk might allow this in some scenarios (e.g., top-level script),
+                 // but non-local returns wouldn't work. Let's throw for now.
+                 throw new SonError("Cannot define block ('=>:') outside of a method context.");
+             }
+
+             const block: SonBlock = {
+                 __type: 'SonBlock',
+                 argNames: argNames,
+                 body: body,
+                 lexicalScope: env, // Capture current environment
+                 homeContext: homeCtx, // Store the defining method context
+             };
+             console.debug("Created block closure:", block);
+             return block;
+         }
+
+
+        // Cascade: ["receiver", "cascade:", [msg1, msg2, ...]]
+        const second = sonArray.length > 1 ? sonArray[1] : null;
+        const third = sonArray.length > 2 ? sonArray[2] : null;
+        if (second === 'cascade:' && Array.isArray(third)) {
+            if (sonArray.length !== 3) {
+                 throw new ArgumentError("Cascade ('cascade:') requires receiver and message array.");
+            }
+            const receiverNode = first;
+            const messages = third as SonArray[];
+            const receiver = evaluate(receiverNode, env);
+
+            if (messages.length === 0) return receiver;
+
+            for (const msg of messages) {
+                if (!Array.isArray(msg) || msg.length === 0) {
+                    throw new ArgumentError("Invalid message format within cascade.");
+                }
+                const selectorNode = msg[0];
+                const argNodes = msg.slice(1);
+
+                if (typeof selectorNode !== 'string') { // Also handle symbols? No, selectors are strings here.
+                     throw new ArgumentError(`Invalid selector in cascade message: ${JSON.stringify(selectorNode)}`);
+                }
+                const selector = selectorNode;
+                const args = argNodes.map(argNode => evaluate(argNode, env));
+
+                // Send the message, discard result (cascades always return original receiver)
+                sendMessage(receiver, selector, args, env);
+            }
+            return receiver; // Cascade returns the original receiver
+        }
+
+
+        // --- Message Send or Sequence ---
+
+        // If it's not a special form handled above, treat as message send or sequence.
+        const evaluatedReceiver = evaluate(first, env);
+
+        // Check if it looks like a message send pattern after evaluating receiver
+        if (sonArray.length >= 2 && typeof second === 'string') {
+            // Keyword Send Check: [evaluatedReceiver, "selector:arg:", argNode1, ...]
+             if (second.includes(':')) {
+                 const selector = second;
+                 const argNodes = sonArray.slice(2);
+                 const args = argNodes.map(argNode => evaluate(argNode, env));
+                 // Basic validation done within sendMessage now
+                 return sendMessage(evaluatedReceiver, selector, args, env);
+             }
+             // Binary Send Check: [evaluatedReceiver, operator, argNode]
+             else if (sonArray.length === 3) {
+                 const selector = second;
+                 const argNodes = sonArray.slice(2); // Should be exactly one argNode
+                 const args = argNodes.map(argNode => evaluate(argNode, env));
+                 return sendMessage(evaluatedReceiver, selector, args, env);
+             }
+             // Unary Send Check: [evaluatedReceiver, selector]
+             else if (sonArray.length === 2) {
+                 const selector = second;
+                 const args = []; // No arguments
+                 return sendMessage(evaluatedReceiver, selector, args, env);
+             }
+        }
+
+        // --- Default to Sequence ---
+        // If it didn't match any message send pattern after evaluating the first element
+        console.debug(`Sequence: ${JSON.stringify(sonArray)}`);
+        let lastResult: SonValue = evaluatedReceiver; // Start with the evaluated first element result
+        for (let i = 1; i < sonArray.length; i++) {
+            try {
+                lastResult = evaluate(sonArray[i], env);
+            } catch (e) {
+                if (e instanceof LocalReturnError || e instanceof NonLocalReturnError) {
+                    // If a return occurs during sequence evaluation, stop and propagate
+                    throw e;
+                } else {
+                    throw e; // Propagate other errors
+                }
+            }
+        }
+        return lastResult; // Return the result of the last statement
+    }
+
+
+    // 3. Handle Objects (if not Symbols or Blocks already handled)
+    if (typeof node === 'object' && node !== null) {
+        // Plain JSON object - return as is for now.
+        // Later, this might represent SON objects with specific behavior.
+        return node as SonObject;
+    }
+
+    // Should not be reachable if SonValue covers all types
+    console.error("Evaluation failed for node:", JSON.stringify(node));
+    throw new Error(`Unknown or unhandled SON node type/structure: ${Object.prototype.toString.call(node)}`);
+}
+
+// --- Placeholder for Method Execution Wrapper ---
+// This would be called when a SON method is looked up and needs execution.
+
+/*
+async function executeSonMethod(receiver: SonValue, methodImpl: SonMethodImplementation, args: SonValue[], callingEnv: ISonEnvironment): Promise<SonValue> {
+    console.debug(`Executing SON method #${methodImpl.selector} on`, receiver); // Selector needs to be part of impl?
+    const methodEnv = callingEnv.createChild({ isMethodContext: true, methodSelf: receiver });
+
+    // Bind args...
+    if (methodImpl.argNames.length !== args.length) {
+        throw new ArgumentError(`Method #${methodImpl.selector} expects ${methodImpl.argNames.length} arguments, but received ${args.length}.`);
+    }
+    for (let i = 0; i < methodImpl.argNames.length; i++) {
+        methodEnv.set(methodImpl.argNames[i], args[i]);
+    }
+
+    try {
+        // Evaluate the method body in the method's environment
+        evaluate(methodImpl.body, methodEnv);
+
+        // If evaluation completes without an error, it means no explicit ^ occurred.
+        // Implicit return of self in Smalltalk methods.
+        console.debug(`Method #${methodImpl.selector} implicitly returning self.`);
+        return receiver; // Return 'self'
+
+    } catch (e) {
+        if (e instanceof LocalReturnError || e instanceof NonLocalReturnError) {
+            // Method context catches both local and non-local returns originating
+            // from its execution (directly or from nested blocks).
+            console.debug(`Method #${methodImpl.selector} caught return:`, e.value);
+            return e.value; // Return the value from '^'
+        } else {
+            // Propagate other errors
+            throw e;
+        }
+    }
+}
+*/
+]]></file_code>
+    </file>
+  </changed_files>
+</code_changes>
+Use code with caution.
+Xml
+STEP 17 COMPLETE. Here's what I did and why:
+types.ts: Defined the SonBlock interface to structurally represent block closures, including captured scope and the 'home context' (the defining method's environment) needed for non-local return logic. Added ISonEnvironment methods/properties related to method context identification (isMethodContext, getMethodSelf, getParent) and placeholders for method definition/lookup.
+errors.ts: Ensured LocalReturnError and NonLocalReturnError exist. Added homeContext property to NonLocalReturnError to carry the specific method context it should return to.
+environment.ts: Added internal flags (_isMethodContext, _methodSelf) and corresponding accessor methods (isMethodContext, getMethodSelf) to SonEnvironment instances created via createChild when executing methods. This allows the interpreter to know if ^ should trigger a local or non-local return. Added getParent accessor. Included placeholders for method definition/lookup.
+interpreter.ts:
+Implemented the =>: special form to create SonBlock objects, correctly capturing the current env as lexicalScope and finding/storing the homeContext.
+Implemented the ^ special form. It evaluates the argument and throws the appropriate LocalReturnError or NonLocalReturnError based on whether the current env isMethodContext(), targeting the correct homeContext for non-local returns.
+Refactored message dispatch into a sendMessage function.
+Implemented block execution logic within sendMessage for selectors like value:. This involves creating a child environment from the block's lexicalScope, binding arguments, and evaluating the body within a try...catch block that specifically handles and propagates NonLocalReturnError.
+Updated sequence evaluation to correctly propagate return errors.
+Kept basic JS interop logic separate in lookupAndSendJS.
+Added placeholder comments and structure anticipating how actual SON method execution will interact with the return mechanism (catching LocalReturnError and NonLocalReturnError).
+USER INSTRUCTIONS: Please do the following:
+Review the changes, particularly in interpreter.ts, to understand the implementation of blocks and return handling.
+Testing: Add unit tests (as per Step 21) specifically for:
+Block creation (=>:).
+Block execution (value:), including argument binding and correct lexical scope capture (variable lookup).
+Local returns (^) from within a simulated method context.
+Non-local returns (^) from within a block, ensuring they are caught by the correct simulated method context.
+Error conditions (e.g., ^ outside method context, arity mismatch for blocks).
