@@ -1,0 +1,336 @@
+Okay, here is a full specification document for the "Harmony" programming language, designed to be detailed enough for building language processing tools.
+Harmony Programming Language Specification
+Version: 0.1 (Initial Draft)
+Date: 2023-10-27
+Table of Contents:
+Introduction
+1.1. Language Name
+1.2. Philosophy
+1.3. Target Audience
+Lexical Structure
+2.1. Character Set
+2.2. Whitespace and Indentation
+2.3. Comments
+2.4. Identifiers
+2.5. Keywords
+2.6. Literals
+2.6.1. Integer Literals
+2.6.2. Float Literals
+2.6.3. String Literals (including Interpolation)
+2.6.4. Boolean Literals
+2.6.5. List Literals
+2.6.6. Dictionary Literals
+2.7. Operators
+2.8. Delimiters
+Grammar (Simplified EBNF)
+3.1. Program Structure
+3.2. Statements
+3.3. Declarations
+3.4. Expressions
+3.5. Type System
+Declarations
+4.1. Variable and Constant Declarations (var, let)
+4.2. Function Declarations (func)
+4.2.1. Parameters
+4.2.2. Return Types
+4.2.3. Implicit Return
+4.3. Class Declarations (class)
+4.3.1. Member Variables
+4.3.2. Initializer (init)
+4.3.3. Methods (func)
+4.3.4. Self (self)
+Types
+5.1. Built-in Types (Int, Float, String, Bool, List, Dict, Void)
+5.2. Type Annotations
+5.3. Type Inference
+5.4. Type Compatibility (Basic)
+Expressions
+6.1. Literals
+6.2. Variable Access
+6.3. Operators (Arithmetic, Comparison, Logical, Assignment)
+6.4. Function Calls
+6.5. Member Access (.)
+6.6. Instance Creation (ClassName(...))
+6.7. List/Dictionary Access ([])
+Statements
+7.1. Expression Statements
+7.2. Assignment Statements (=)
+7.3. Control Flow
+7.3.1. Conditional Statements (if/elif/else)
+7.3.2. While Loops (while)
+7.3.3. For-In Loops (for...in)
+7.4. Return Statement (return)
+7.5. Print Statement (Built-in print)
+Scope
+8.1. Function Scope
+8.2. Block Scope (within control structures, functions, classes)
+8.3. Class Scope
+Modules (Minimal)
+9.1. File-based Modules
+9.2. Importing (Conceptual)
+Standard Library (Minimal)
+10.1. Built-in Functions (print, len, str, int, float)
+10.2. Basic List Operations (Conceptual append)
+Error Handling (Conceptual)
+11.1. Compile-Time Errors
+11.2. Runtime Errors
+Appendix: Example Code
+1. Introduction
+1.1. Language Name: Harmony
+1.2. Philosophy:
+Readability First: Prioritize clear, understandable syntax.
+Gradual Typing: Support dynamic typing initially, with optional static types for safety and clarity. Excellent type inference is a goal.
+Modern & Safe: Incorporate explicit mutability (let/var).
+Minimal Ceremony: Reduce boilerplate (no semicolons, indentation-based blocks).
+1.3. Target Audience: Beginners, educators, developers seeking a simple scripting language with optional static typing.
+2. Lexical Structure
+2.1. Character Set: UTF-8.
+2.2. Whitespace and Indentation:
+Spaces and tabs are used for indentation. Consistent use of either spaces (preferred, typically 4) or tabs within a block is required. Mixing tabs and spaces for indentation within the same block leads to an error.
+Indentation defines logical code blocks. Increased indentation starts a new block; decreased indentation ends the current block(s).
+Blank lines are ignored unless they affect indentation levels.
+Inline whitespace (spaces) is generally insignificant except for separating tokens.
+Line breaks typically signify the end of a statement, unless the line ends with an open parenthesis (, bracket [, brace {, comma ,, or an operator requiring a subsequent operand, allowing implicit line continuation.
+2.3. Comments: Single-line comments start with # and continue to the end of the line. No multi-line comment syntax.
+# This is a comment
+let x = 10 # This is an inline comment
+Use code with caution.
+Harmony
+2.4. Identifiers:
+Must start with an alphabetic character (a-z, A-Z) or an underscore (_).
+Can be followed by alphanumeric characters or underscores.
+Case-sensitive (myVar is different from myvar).
+Cannot be a reserved keyword.
+2.5. Keywords: The following are reserved keywords and cannot be used as identifiers:
+let, var, func, class, init, self, if, elif, else, while, for, in, return, true, false, and, or, not
+Note: Built-in type names (String, Int, Float, Bool, List, Dict, Void) are treated as predefined identifiers, not strict keywords, allowing potential shadowing if necessary, though discouraged.
+2.6. Literals:
+2.6.1. Integer Literals: Sequences of digits (0-9). Example: 123, 0, 9999. No octal/hex/binary literals defined in this version.
+2.6.2. Float Literals: Contain a decimal point .. Must have digits before or after the point. Example: 3.14, 0.5, 10.0. No scientific notation (e.g., 1e3) defined in this version.
+2.6.3. String Literals: Enclosed in double quotes ("). Support escape sequences (\n, \t, \\, \").
+String Interpolation: Within a string literal, expressions enclosed in \( and ) are evaluated and their string representation inserted. Example: let name = "World"; print("Hello \(name)!").
+2.6.4. Boolean Literals: true, false.
+2.6.5. List Literals: Comma-separated sequence of expressions enclosed in square brackets []. Example: [1, 2, 3], ["a", "b"], [], [1, "mix", true]. Trailing commas are allowed.
+2.6.6. Dictionary Literals: Comma-separated sequence of key: value pairs enclosed in curly braces {}. Keys are typically strings or integers (must be hashable). Example: {"name": "Alice", "age": 30}, {1: "one", 2: "two"}, {}. Trailing commas are allowed.
+2.7. Operators:
+Arithmetic: +, -, *, / (Float division)
+Comparison: ==, !=, <, >, <=, >=
+Logical: and, or, not (used infix, except not which is prefix)
+Assignment: =
+Member Access: .
+Subscript (Access): []
+2.8. Delimiters: ( ) [ ] { } : , . ->
+3. Grammar (Simplified EBNF)
+(Note: This EBNF uses conceptual NEWLINE, INDENT, DEDENT tokens generated by the lexer based on whitespace.)
+Program ::= StatementList
+
+StatementList ::= (Statement)+
+
+Statement ::= SimpleStatement | CompoundStatement
+
+SimpleStatement ::= (Assignment | ExpressionStatement | ReturnStatement | PassStatement | BreakStatement | ContinueStatement) NEWLINE
+    (* Note: `pass`, `break`, `continue` are not in the minimal spec above, add if needed *)
+
+CompoundStatement ::= IfStatement | WhileStatement | ForStatement | FuncDef | ClassDef
+
+Block ::= ':' NEWLINE INDENT StatementList DEDENT
+
+# Declarations
+Declaration ::= VarDecl | FuncDef | ClassDef
+VarDecl ::= ('let' | 'var') IDENTIFIER (':' Type)? '=' Expression
+
+FuncDef ::= 'func' IDENTIFIER '(' ParamList? ')' ('->' Type)? Block
+ParamList ::= Parameter (',' Parameter)*
+Parameter ::= IDENTIFIER (':' Type)? ('=' Expression)? (* Default value *)
+
+ClassDef ::= 'class' IDENTIFIER Block (* Simplified block content for spec *)
+ClassBodyStatement ::= MemberVarDecl | FuncDef | InitDef
+MemberVarDecl ::= ('let' | 'var') IDENTIFIER ':' Type ('=' Expression)? NEWLINE (* Requires type for members *)
+InitDef ::= 'func' 'init' '(' ParamList? ')' Block
+
+# Statements
+Assignment ::= Target '=' Expression
+Target ::= IDENTIFIER | SubscriptAccess | MemberAccess (* LHS of assignment *)
+
+ExpressionStatement ::= Expression
+
+IfStatement ::= 'if' Expression Block ('elif' Expression Block)* ('else' Block)?
+WhileStatement ::= 'while' Expression Block
+ForStatement ::= 'for' IDENTIFIER 'in' Expression Block
+ReturnStatement ::= 'return' Expression?
+
+# Expressions (Simplified Precedence)
+Expression ::= LogicalOrExpr
+LogicalOrExpr ::= LogicalAndExpr ('or' LogicalAndExpr)*
+LogicalAndExpr ::= ComparisonExpr ('and' ComparisonExpr)*
+ComparisonExpr ::= AdditiveExpr (('==' | '!=' | '<' | '>' | '<=' | '>=') AdditiveExpr)?
+AdditiveExpr ::= MultiplicativeExpr (('+' | '-') MultiplicativeExpr)*
+MultiplicativeExpr ::= UnaryExpr (('*' | '/') UnaryExpr)*
+UnaryExpr ::= ('not' UnaryExpr) | PrimaryExpr
+
+PrimaryExpr ::= Literal | IDENTIFIER | '(' Expression ')' | FunctionCall | MemberAccess | SubscriptAccess | ListLiteral | DictLiteral | 'self'
+
+FunctionCall ::= PrimaryExpr '(' ArgumentList? ')'
+ArgumentList ::= Expression (',' Expression)*
+
+MemberAccess ::= PrimaryExpr '.' IDENTIFIER
+SubscriptAccess ::= PrimaryExpr '[' Expression ']'
+
+ListLiteral ::= '[' ArgumentList? ']'
+DictLiteral ::= '{' DictItemList? '}'
+DictItemList ::= DictItem (',' DictItem)*
+DictItem ::= Expression ':' Expression
+
+# Types
+Type ::= IDENTIFIER (* e.g., Int, String, CustomClassName *)
+Literal ::= INTEGER | FLOAT | STRING | 'true' | 'false'
+Use code with caution.
+Ebnf
+4. Declarations
+4.1. Variable and Constant Declarations (var, let):
+let name = value: Declares an immutable constant name initialized with value. Cannot be reassigned.
+var name = value: Declares a mutable variable name initialized with value. Can be reassigned using =.
+Type annotation is optional (See 5.2). If omitted, the type is inferred (See 5.3).
+Must be initialized at declaration.
+4.2. Function Declarations (func):
+func functionName(param1, param2: Type, ...) -> ReturnType: introduces a function.
+4.2.1. Parameters: Comma-separated list within (). Each parameter is an identifier, optionally followed by : Type. Default values can be provided using = defaultValue.
+4.2.2. Return Types: Specified after ->. If omitted, the function implicitly returns Void (no value).
+4.2.3. Implicit Return: If a function body consists of a single expression, or if the last statement in the function body is an expression, that expression's value is implicitly returned (unless an explicit return statement is used earlier). This does not apply if -> Void is specified or implied.
+4.3. Class Declarations (class):
+class ClassName: introduces a new class. The body is indented.
+4.3.1. Member Variables: Declared within the class body using let or var. Must have explicit type annotations (: Type). Can have optional initial values. Must be initialized either here or in init.
+4.3.2. Initializer (init): A special method named init defined using func init(...). Called when creating an instance (ClassName(...)). Used to initialize member variables. Does not have a -> ReturnType.
+4.3.3. Methods (func): Regular functions defined within the class body using func. They operate on instances of the class.
+4.3.4. Self (self): Within methods and init, self refers to the current instance of the class. Used to access member variables and other methods (self.member, self.method()). self is an implicit first parameter conceptually but not written in the method signature by the user.
+5. Types
+5.1. Built-in Types:
+Int: Arbitrary-precision integers.
+Float: Floating-point numbers (typically IEEE 754 64-bit).
+String: Immutable sequence of UTF-8 characters.
+Bool: Boolean values (true or false).
+List: Ordered, mutable sequence of elements (heterogeneous allowed by default, but type checking might enforce homogeneity if types are used).
+Dict: Mutable collection of key-value pairs (Dictionary/Map). Keys must be hashable (Ints, Strings).
+Void: Represents the absence of a return value. Cannot be explicitly annotated usually, implied by lack of ->.
+5.2. Type Annotations: Optional. Use colon : after identifier name: let name: String = "value", func add(a: Int, b: Int) -> Int: .... Used for variables, constants, parameters, return types, and class members.
+5.3. Type Inference: When type annotations are omitted for let/var declarations, the compiler/interpreter infers the type from the initializer expression. Function return types are inferred only in trivial cases if not specified; Void is usually assumed if -> is absent.
+5.4. Type Compatibility (Basic): Basic type checking occurs if types are annotated or inferred. Assigning a value of an incompatible type to a typed variable results in an error (e.g., var age: Int = 10; age = "old" is an error). Implicit numeric conversion (e.g., Int to Float) is generally not performed automatically; explicit conversion (float(myInt)) is required.
+6. Expressions
+6.1. Literals: See 2.6.
+6.2. Variable Access: Using an identifier name evaluates to its current value.
+6.3. Operators:
+Arithmetic: +, -, *, /. Standard precedence (*, / before +, -). / performs float division.
+Comparison: ==, !=, <, >, <=, >=. Return Bool.
+Logical: and, or, not. not has highest precedence, then and, then or. Short-circuiting applies (or stops if LHS is true, and stops if LHS is false).
+Assignment: = (See 7.2).
+6.4. Function Calls: functionName(argument1, argument2, ...)
+6.5. Member Access: object.memberName or object.methodName(...)
+6.6. Instance Creation: ClassName(initializerArguments...)
+6.7. List/Dictionary Access: myList[index] (Index is Int, 0-based), myDict[key] (Key is typically String or Int). Also used for assignment: myList[index] = newValue.
+7. Statements
+7.1. Expression Statements: An expression evaluated for its side effects (e.g., a function call print("Hello")). The result is discarded.
+7.2. Assignment Statements: target = expression. Evaluates expression and assigns the result to target (must be a mutable variable (var) or mutable element/member).
+7.3. Control Flow:
+7.3.1. Conditional Statements (if/elif/else):
+if condition1:
+    # block executed if condition1 is true
+elif condition2:
+    # block executed if condition1 false, condition2 true
+else:
+    # block executed if all preceding conditions false
+Use code with caution.
+Harmony
+elif and else are optional. Conditions evaluate to Bool.
+7.3.2. While Loops (while):
+while condition:
+    # block executed as long as condition is true
+Use code with caution.
+Harmony
+Condition is checked before each iteration.
+7.3.3. For-In Loops (for...in):
+for item in iterable:
+    # block executed for each item in the iterable (e.g., List)
+Use code with caution.
+Harmony
+Iterates over elements of sequences (like List). item is assigned each element successively.
+7.4. Return Statement (return):
+return expression: Exits the current function, returning the value of expression.
+return: Exits the current function, returning Void.
+Implicit return applies as described in 4.2.3.
+7.5. Print Statement (Built-in print): print(arg1, arg2, ...) outputs string representations of arguments to standard output, separated by spaces, followed by a newline.
+8. Scope
+8.1. Function Scope: Variables declared inside a function are local to that function.
+8.2. Block Scope: Variables declared inside if, while, for blocks using let/var are typically scoped to that block (Lexical Scoping). Decision: For simplicity, let's align with Python initially where if/while/for do NOT create new scopes, but functions and classes DO. This is easier for beginners but less safe. Revisit if needed. So, variables declared in if/while/for are accessible after the block in the containing scope (function or global).
+8.3. Class Scope: Member variables and methods belong to the class scope, accessed via self.
+9. Modules (Minimal)
+9.1. File-based Modules: Each .hy file acts as a module.
+9.2. Importing (Conceptual): An import moduleName statement (where moduleName corresponds to moduleName.hy) would conceptually make the top-level definitions (functions, classes, constants) from that file available, likely requiring qualification (e.g., moduleName.function()). Exact syntax and semantics TBD, keep minimal for v0.1.
+10. Standard Library (Minimal)
+10.1. Built-in Functions: Globally available without import:
+print(...): Outputs arguments to console.
+len(collection): Returns the number of items in a List or Dict.
+str(value): Converts value to its String representation.
+int(value): Converts value (e.g., Float, String) to Int. Fails on invalid format.
+float(value): Converts value (e.g., Int, String) to Float. Fails on invalid format.
+10.2. Basic List Operations: Lists (List) are expected to support basic operations like appending. The mechanism could be a built-in method (e.g., myList.append(item)). Exact methods TBD.
+11. Error Handling (Conceptual)
+11.1. Compile-Time Errors: Detected before execution. Include syntax errors (incorrect structure), indentation errors, type errors (if annotations are used/inferred and violated), undeclared identifier usage.
+11.2. Runtime Errors: Occur during execution. Include division by zero, index out of bounds (accessing list element beyond its size), key error (accessing non-existent dictionary key), type errors not caught statically (if types are fully dynamic). Typically halts execution and reports error type and location. No try/except mechanism defined in v0.1.
+12. Appendix: Example Code
+# Harmony Example v0.1
+
+# Function definition with type annotations and implicit return
+func greet(name: String) -> String:
+    "Hello, \(name)!" # Implicit return of the expression
+
+# Class definition
+class Counter:
+    var value: Int = 0 # Member variable with type and default value
+
+    # Initializer (no 'func' keyword needed typically, let's stick to func init for consistency)
+    func init(startValue: Int):
+        self.value = startValue
+
+    # Method
+    func increment(amount: Int = 1):
+        self.value = self.value + amount
+
+    # Method
+    func getValue() -> Int:
+        self.value # Implicit return
+
+# --- Main Execution ---
+
+# Use the greet function
+let message = greet("Harmony User")
+print(message) # Output: Hello, Harmony User!
+
+# Variables and Constants
+let initialCount = 5
+var myCounter = Counter(startValue: initialCount)
+
+# Loop and method calls
+print("Starting count: \(myCounter.getValue())")
+let iterations = 3
+var i = 0
+while i < iterations:
+    myCounter.increment()
+    print("Incremented. Current count: \(myCounter.getValue())")
+    i = i + 1
+
+# Using let/var and lists
+let names: List = ["Alice", "Bob"]
+# names.append("Charlie") # Assumes append method exists
+print("Names: \(names), Length: \(len(names))")
+
+# Control flow
+if myCounter.getValue() > 7:
+    print("Counter is large!")
+elif myCounter.getValue() > 5:
+    print("Counter is medium.")
+else:
+    print("Counter is small.")
+
+# For loop
+for name in names:
+    print("Processing name: \(name)")
