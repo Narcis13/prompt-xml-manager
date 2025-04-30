@@ -1,0 +1,1390 @@
+<code_changes>
+  <changed_files>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>client/src/contexts/SonEnvironmentContext.tsx</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file defines the React Context and Provider for managing the global SON execution environment ($env).
+ * It handles initializing the environment, fetching the base definitions from the backend API,
+ * and providing the environment instance, loading state, error state, and a reload function to consuming components.
+ * The `mergeBaseEnvironment` function is designed to handle base environment data where keys
+ * are class names and values are objects potentially containing method definitions. It creates
+ * `SonEnvironment` instances for these class definitions to enable method lookup. It also
+ * specifically handles the `JSBridge` object by attaching actual JS functions.
+ * </ai_info>
+ *
+ * @file client/src/contexts/SonEnvironmentContext.tsx
+ * @description React Context for managing the SON execution environment ($env).
+ *
+ * Key features:
+ * - Creates a React Context (`SonEnvironmentContext`).
+ * - Defines the `SonEnvironmentProvider` component.
+ * - Manages the `ISonEnvironment` instance using `useState`.
+ * - Fetches the base environment from the API (`apiClient.getBaseEnvironment`) on mount using `useEffect`.
+ * - Handles loading and error states during the fetch process.
+ * - Provides a `reloadEnvironment` function to refetch the base environment.
+ * - Merges fetched base environment data into the root `SonEnvironment` instance, creating
+ *   `SonEnvironment` instances for class definitions found in the base data.
+ * - Creates a special JS object for `JSBridge` and attaches real JS functions to it.
+ *
+ * @dependencies
+ * - react: Core React hooks (`createContext`, `useState`, `useEffect`, `useCallback`, `ReactNode`).
+ * - ../lib/apiClient: Function to fetch the base environment (`getBaseEnvironment`) and related types.
+ * - ../lib/son/environment: The `SonEnvironment` class implementing `ISonEnvironment`.
+ * - ../lib/son/types: Core SON types (`ISonEnvironment`, `SonValue`, `SonMethodImplementation`, `SonBlock`).
+ * - ../lib/son/interpreter: `evaluate` function needed for `setTimeout` callback.
+ *
+ * @notes
+ * - The initial `environment` state is null until the base environment is loaded.
+ * - Error handling during fetching is included.
+ * - `mergeBaseEnvironment` attempts to instantiate `SonEnvironment` for base classes,
+ *   assuming a structure like `{"ClassName": {"methods": {"selector": {...}}}}`.
+ * - `JSBridge` is handled specially to link to actual browser/JS capabilities.
+ */
+"use client"; // Required for context and hooks
+
+import React, {
+	createContext,
+	useState,
+	useEffect,
+	useCallback,
+	ReactNode,
+} from "react";
+import { getBaseEnvironment, BaseEnvironmentResponse, SonValue } from "@/lib/apiClient";
+import { SonEnvironment } from "@/lib/son/environment";
+import { ISonEnvironment, SonMethodImplementation, SonBlock } from "@/lib/son/types"; // Import SonMethodImplementation, SonBlock
+import { evaluate } from "@/lib/son/interpreter"; // Needed for setTimeout callback evaluation
+import { SonError } from "@/lib/son/errors"; // Import SonError
+
+/**
+ * Defines the shape of the value provided by the SonEnvironmentContext.
+ */
+interface SonEnvironmentContextType {
+	/** The root SON execution environment instance, or null if not yet loaded/initialized. */
+	environment: ISonEnvironment | null;
+	/** Indicates if the base environment is currently being loaded. */
+	isLoading: boolean;
+	/** Stores any error message that occurred during environment loading. */
+	error: string | null;
+	/** Function to trigger a reload of the base environment from the API. */
+	reloadEnvironment: () => void;
+}
+
+/**
+ * React Context object for the SON environment.
+ */
+const SonEnvironmentContext = createContext<SonEnvironmentContextType | undefined>(
+	undefined
+);
+
+/**
+ * Props for the SonEnvironmentProvider component.
+ */
+interface SonEnvironmentProviderProps {
+	children: ReactNode;
+}
+
+/**
+ * Merges the fetched base environment data into a SonEnvironment instance.
+ * It iterates through the top-level keys of the base data.
+ * - Handles `JSBridge` specifically by creating a JS object with real functions.
+ * - If a value looks like a class definition (e.g., an object with a 'methods' property), it
+ *   creates a new SonEnvironment instance for it and defines its methods.
+ * - Otherwise, it sets the value directly.
+ *
+ * @param env The root SonEnvironment instance to merge into.
+ * @param baseData The fetched base environment data (key-value map).
+ */
+const mergeBaseEnvironment = (env: ISonEnvironment, baseData: BaseEnvironmentResponse) => {
+    console.log("Merging base environment data:", baseData);
+
+    for (const key in baseData) {
+        if (Object.prototype.hasOwnProperty.call(baseData, key)) {
+            const value = baseData[key];
+
+            // --- Special Handling for JSBridge ---
+            if (key === 'JSBridge' && typeof value === 'object' && value !== null && (value as any).__isJSBridge === true) {
+                console.log("Detected JSBridge definition. Creating special bridge object...");
+                const jsBridgeObject = {
+                    __isJSBridge: true, // Mark this object for the interpreter
+                    // Add actual JS implementation functions here
+                    'log:': (message: SonValue) => {
+                        // Convert SON value to string/readable format for console
+                        console.log('[SON Log]', String(message)); // Prefix logs from SON
+                        return jsBridgeObject; // Return self (bridge object) for chaining/consistency
+                    },
+                    'setTimeout:delay:': (block: SonValue, delayMs: SonValue) => {
+                        if (typeof block !== 'object' || block === null || (block as any).__type !== 'SonBlock') {
+                             // Throwing error here might be harsh, could return null/error object in SON?
+                             console.error("JSBridge Error: setTimeout: expects a BlockClosure as the first argument.");
+                             throw new Error("setTimeout: first argument must be a BlockClosure");
+                             // return null;
+                        }
+                        if (typeof delayMs !== 'number' || !Number.isInteger(delayMs) || delayMs < 0) {
+                            console.error("JSBridge Error: setTimeout: expects a non-negative integer delay (ms) as the second argument.");
+                            throw new Error("setTimeout: second argument must be a non-negative integer delay (ms)");
+                            // return null;
+                        }
+
+                        const sonBlock = block as SonBlock;
+                        console.log(`JSBridge: Scheduling block execution in ${delayMs}ms`);
+
+                        setTimeout(() => {
+                             console.log(`JSBridge: Executing scheduled block after ${delayMs}ms delay.`);
+                             // Evaluate the block's body in its captured lexical scope
+                             // Note: This evaluation happens asynchronously. Errors need careful handling.
+                             try {
+                                // Blocks evaluate as sequences, result is the last statement's value
+                                 let blockResult: SonValue = null; // Default result if body is empty
+                                 if(Array.isArray(sonBlock.body)) {
+                                    for (let i = 0; i < sonBlock.body.length; i++) {
+                                        // Use the block's *captured* lexical scope, NOT the global env
+                                        blockResult = evaluate(sonBlock.body[i], sonBlock.lexicalScope);
+                                    }
+                                 } else {
+                                     console.error("Scheduled block execution failed: Invalid block body structure.");
+                                     // How to report this async error back to SON? Difficult.
+                                 }
+                                 console.log(`JSBridge: Scheduled block finished execution. Result (unused):`, blockResult);
+                             } catch (e) {
+                                 // Catch errors during async block execution. Cannot easily throw back into SON.
+                                 console.error("Error during scheduled block execution:", e);
+                                 if (e instanceof LocalReturnError || e instanceof NonLocalReturnError) {
+                                     console.error("Error: Cannot perform return (^) from asynchronously executed block via setTimeout.");
+                                 }
+                                 // Potential: Use WebSocket or another mechanism to report async errors to the UI?
+                             }
+                        }, delayMs);
+
+                        return jsBridgeObject; // setTimeout returns self
+                    },
+                    // Add placeholder for fetch, implementation deferred
+                    'fetch:options:': (url: SonValue, options: SonValue) => {
+                        console.warn("JSBridge fetch:options: is not implemented yet.");
+                        // For now, return null or throw a SON error?
+                         // throw new SonError("JSBridge fetch:options: is not implemented.");
+                        return null;
+                    }
+                    // Add more JS bridge methods as needed
+                };
+                // Store the functional JS object in the environment
+                env.set(key, jsBridgeObject);
+                continue; // Skip other merging logic for JSBridge
+            }
+
+            // --- Heuristic for Class Definitions ---
+            // Check if the value is an object containing a 'methods' property which is also an object.
+             let isClassDefinition = false;
+             if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                 const potentialClass = value as any;
+                 if (potentialClass.hasOwnProperty('methods') && typeof potentialClass.methods === 'object' && potentialClass.methods !== null) {
+                     isClassDefinition = true;
+                 }
+             }
+
+
+            if (isClassDefinition) {
+                console.log(`Detected class definition for '${key}'. Creating SonEnvironment...`);
+                // Create a new environment for the class.
+                // Base classes typically don't inherit from anything in this model,
+                // inheritance is handled via lookup chain (e.g., checking Object if method not found).
+                // For simplicity, their parent is null.
+                const classEnv = new SonEnvironment(null);
+
+                // Add methods from the definition to the class environment
+                const methods = (value as any).methods as Record<string, any>;
+                for (const selector in methods) {
+                    if (Object.prototype.hasOwnProperty.call(methods, selector)) {
+                        const methodData = methods[selector];
+                        // Validate method structure before defining
+                        if (typeof methodData === 'object' && methodData !== null && Array.isArray(methodData.argNames) && methodData.body !== undefined) {
+                             const argNames = methodData.argNames.map(String); // Ensure strings
+                             classEnv.defineMethod(selector, argNames, methodData.body as SonValue);
+                             // console.log(` -> Defined method #${selector} for class ${key}`);
+                        } else {
+                             console.warn(`Invalid method structure for ${key}>>${selector}. Skipping.`);
+                        }
+                    }
+                }
+                // Store the created class environment under the class name in the root environment
+                env.set(key, classEnv);
+
+            } else {
+                // If it doesn't look like a class or JSBridge, store the value directly
+                console.log(`Setting base value for '${key}' (not detected as class/JSBridge).`);
+                env.set(key, value as SonValue);
+            }
+        }
+    }
+    console.log("Environment state after merge:");
+    // Use console.dir for better object inspection if dumpScope isn't available/sufficient
+    console.dir(env);
+    if (env instanceof SonEnvironment && env.dumpScope) {
+         console.log(env.dumpScope(1)); // Dump root and one level down
+    }
+};
+
+
+/**
+ * Provides the SON execution environment state to its children components.
+ * Fetches the base environment on initial mount.
+ *
+ * @param {SonEnvironmentProviderProps} props - The component props.
+ * @returns {JSX.Element} The provider component wrapping its children.
+ */
+export function SonEnvironmentProvider({ children }: SonEnvironmentProviderProps): JSX.Element {
+	const [environment, setEnvironment] = useState<ISonEnvironment | null>(null);
+	const [isLoading, setIsLoading] = useState<boolean>(true); // Start loading initially
+	const [error, setError] = useState<string | null>(null);
+
+	/**
+	 * Loads the base environment from the backend API and initializes the environment state.
+	 * Uses `useCallback` to memoize the function for stability.
+	 */
+	const loadBaseEnvironment = useCallback(async () => {
+		console.log("Attempting to load base environment...");
+		setIsLoading(true);
+		setError(null);
+		setEnvironment(null); // Reset environment while loading
+
+		try {
+			// Fetch the base environment JSON object from the API
+			const baseEnvData = await getBaseEnvironment();
+
+			// Create the root environment instance
+            // The root environment has no parent.
+			const rootEnv = new SonEnvironment(null);
+
+			// Merge the fetched data into the root environment
+            // This function now handles classes and the JSBridge specifically
+			mergeBaseEnvironment(rootEnv, baseEnvData);
+
+			// Set the initialized environment state
+			setEnvironment(rootEnv);
+			console.log("Base environment loaded and set successfully.");
+
+		} catch (err: any) {
+			console.error("Failed to load base environment:", err);
+			setError(err.message || "An unknown error occurred while loading the environment.");
+            setEnvironment(null); // Ensure environment is null on error
+		} finally {
+			setIsLoading(false);
+            console.log("Finished loading base environment (success or failure).");
+		}
+	}, []); // No dependencies, should only run once unless explicitly called by reload
+
+	/**
+	 * Reloads the base environment by calling `loadBaseEnvironment`.
+	 */
+	const reloadEnvironment = useCallback(() => {
+        console.log("Reload environment triggered.");
+		loadBaseEnvironment();
+	}, [loadBaseEnvironment]); // Depends on the memoized load function
+
+	// Load the base environment when the provider mounts
+	useEffect(() => {
+        console.log("SonEnvironmentProvider mounted, initiating base environment load.");
+		loadBaseEnvironment();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []); // Run only once on mount
+
+
+	// Prepare the context value
+	const contextValue: SonEnvironmentContextType = {
+		environment,
+		isLoading,
+		error,
+		reloadEnvironment,
+	};
+
+	return (
+		<SonEnvironmentContext.Provider value={contextValue}>
+			{children}
+		</SonEnvironmentContext.Provider>
+	);
+}
+
+export { SonEnvironmentContext }; // Export context for direct use if needed
+      ]]>
+</file_code>
+</file>
+<file>
+  <file_operation>UPDATE</file_operation>
+  <file_path>client/src/lib/son/interpreter.ts</file_path>
+  <file_code><![CDATA[
+    /**
+<ai_info>
+This file contains the core evaluation logic for SON (Smalltalk Object Notation) JSON.
+The evaluate function recursively traverses the SON Abstract Syntax Tree (AST) represented
+as JSON, interpreting the different language constructs according to the specification.
+It now handles block closures (=>:), local and non-local returns (^), assignments,
+cascades, sequences, message sends (including class-based lookup and implicit self-return),
+primitive operations (e.g., primitive:NumberAdd:), and calls to the special JSBridge.
+</ai_info>
+@file client/src/lib/son/interpreter.ts
+@description Core evaluation logic for SON JSON, including primitives, JSBridge, and class-based method dispatch.
+Key features:
+Recursive evaluate function for SON nodes.
+Handles literals, symbols, variables.
+Handles sequences, assignment, cascades.
+Handles block closure definition (=>:) capturing lexical scope and home context.
+Handles return statements (^) throwing LocalReturnError or NonLocalReturnError.
+Handles primitive calls (primitive:...).
+Handles special calls to the JSBridge object for JS interop.
+Enhanced sendMessage function:
+Checks for JSBridge first.
+Determines receiver's SON class using getClassOf.
+Looks up SON methods using lookupMethodLocally on the class object.
+Executes found SON methods with correct context and return handling.
+Handles block execution (value:, value:value:, etc.).
+Falls back to basic JS property lookup (deprecated in favor of JSBridge/Primitives).
+Includes error handling and propagation for returns.
+*/
+import {
+ISonEnvironment,
+SonValue,
+SonSymbol,
+SonArray,
+SonObject,
+SonBlock,
+SonMethodImplementation,
+} from './types';
+import {
+VariableNotFoundError,
+MessageNotUnderstoodError,
+ArgumentError,
+SonError,
+LocalReturnError,
+NonLocalReturnError,
+} from './errors';
+import { SonEnvironment } from './environment'; // Import SonEnvironment for instanceof checks if needed
+// --- Type Guards ---
+/** Checks if a value is a SON symbol literal. */
+function isSonSymbol(value: any): value is SonSymbol {
+return typeof value === 'object' && value !== null && '#' in value && typeof value['#'] === 'string';
+}
+/** Checks if a value is a SON block closure object. */
+function isSonBlock(value: any): value is SonBlock {
+return typeof value === 'object' && value !== null && value.__type === 'SonBlock';
+}
+/** Checks if a value is the special JSBridge object. */
+function isJsBridge(value: any): value is { __isJSBridge: true; [key: string]: any } {
+return typeof value === 'object' && value !== null && value.__isJSBridge === true;
+}
+/** Checks if a value is likely a plain JSON object (not a Symbol, Block, or JSBridge). */
+function isPlainObject(value: any): value is { [key: string]: SonValue } {
+return typeof value === 'object' && value !== null && !Array.isArray(value) && !isSonSymbol(value) && !isSonBlock(value) && !isJsBridge(value);
+}
+// --- Helper Functions ---
+/**
+Finds the environment corresponding to the method context in which a block was defined.
+Traverses the parent chain from the block's lexical scope.
+@param startEnv The initial environment (usually the block's lexical scope).
+@returns The home method context environment, or null if the block was not defined within a method context.
+*/
+function findHomeContext(startEnv: ISonEnvironment): ISonEnvironment | null {
+let current: ISonEnvironment | null = startEnv;
+while (current) {
+if (current.isMethodContext()) {
+return current;
+}
+current = current.getParent();
+}
+// It's valid for a block to be defined outside a method context (e.g., top level script)
+return null;
+}
+/**
+Determines the SON "Class" object for a given JavaScript runtime value.
+Looks up the class name (e.g., 'Number', 'String', 'BlockClosure') in the environment.
+@param value The JavaScript value whose class is needed.
+@param env The current environment, used to look up class objects like 'Number'.
+@returns The corresponding SON Class object (expected to conform to ISonEnvironment or have methods) or null if no class found.
+@throws {Error} If the environment itself is missing a required base class (e.g., 'Object').
+*/
+function getClassOf(value: SonValue, env: ISonEnvironment): ISonEnvironment | SonObject | null {
+let className: string | null = null;
+if (value === null) {
+// Represent null using a specific class, e.g., 'UndefinedObject' or 'Null' if defined
+className = 'UndefinedObject'; // Assuming this class exists in base env
+} else if (typeof value === 'number') {
+className = 'Number';
+} else if (typeof value === 'string') {
+// Check if it's a variable string first (though evaluate should handle this)
+if (value.startsWith('$')) {
+console.warn(getClassOf received unevaluated variable string: ${value});
+// Attempt to evaluate it - this might be redundant if evaluate works correctly
+try {
+const evaluatedValue = evaluate(value, env);
+return getClassOf(evaluatedValue, env); // Recurse with the evaluated value
+} catch (e) {
+console.error(Error evaluating potential variable ${value} in getClassOf, e);
+className = 'String'; // Fallback to String if evaluation fails
+}
+} else {
+className = 'String';
+}
+} else if (typeof value === 'boolean') {
+className = 'Boolean';
+} else if (isSonSymbol(value)) {
+className = 'Symbol';
+} else if (isSonBlock(value)) {
+className = 'BlockClosure';
+} else if (isJsBridge(value)) {
+// The JSBridge is special, doesn't really have a SON class representation
+// Messages are handled directly. Return null to prevent standard lookup.
+return null;
+} else if (value instanceof SonEnvironment) {
+// If the value is an environment itself (e.g., a class object), its "class" is complex.
+// Maybe 'Metaclass'? For now, let's treat it like 'Object' for method lookup purposes,
+// assuming methods are defined on the environment instance.
+// Alternatively, message sends directly to environments could be handled specially.
+className = 'Object'; // Fallback? Or handle environments explicitly?
+// Let's try returning the environment itself as the 'class' object
+return value;
+} else if (typeof value === 'object') {
+// Default for other objects
+className = 'Object';
+}
+if (className) {
+try {
+// Look up the class object in the environment
+const classObj = env.get(className);
+// We expect the class object to conform to ISonEnvironment or be a plain object with methods
+if (typeof classObj === 'object' && classObj !== null) {
+// Check if it's an environment (which implements lookupMethodLocally)
+if (classObj instanceof SonEnvironment || (typeof (classObj as any).lookupMethodLocally === 'function')) {
+return classObj as ISonEnvironment;
+}
+// Check if it's a plain object structure from base env (with a 'methods' property)
+if (isPlainObject(classObj) && (classObj as any).methods) {
+return classObj as SonObject; // Return the plain object structure
+}
+}
+console.warn(Class object for '${className}' not found or not a valid object/environment structure in env.);
+// Fallback to Object class if primary class lookup fails?
+if (className !== 'Object') {
+console.warn(Falling back to 'Object' class lookup for value of type '${className}'.);
+return getClassOf({}, env); // Get the Object class definition
+}
+return null; // Class definition not found or invalid
+} catch (e) {
+     if (e instanceof VariableNotFoundError) {
+          // This is critical if base classes like 'Object' are missing.
+          console.error(`Core class '${className}' not found in environment! Base environment might be incomplete.`);
+          if (className === 'Object') throw new Error("Critical Error: SON 'Object' class definition missing from environment.");
+          // Try falling back to Object if a specific class is missing
+          if (className !== 'Object') {
+              console.warn(`Falling back to 'Object' class lookup because '${className}' was not found.`);
+              return getClassOf({}, env); // Get the Object class definition
+          }
+          return null; // Class not found
+     } else {
+         throw e; // Re-throw other errors during lookup
+     }
+ }
+ }
+console.warn(Could not determine SON class for value:, value);
+return getClassOf({}, env); // Default to Object class if all else fails
+}
+/**
+Handles message sending for basic JavaScript property lookup (used as a last resort).
+DEPRECATED: Prefer using primitives or the JSBridge for JS interop.
+@param receiver The evaluated receiver object.
+@param selector The message selector string.
+@param args The evaluated arguments array.
+@returns The result of the JS property access/call.
+@throws {MessageNotUnderstoodError} If the property doesn't exist or isn't appropriate.
+*/
+function lookupAndSendJSProperty(receiver: any, selector: string, args: SonValue[]): SonValue {
+console.warn(Attempting fallback JS property lookup for #${selector} on:, receiver); // Log fallback usage
+if (receiver === null || receiver === undefined) {
+throw new MessageNotUnderstoodError(receiver, selector);
+}
+const property = (receiver as any)[selector];
+if (args.length === 0) {
+// Unary send: Treat as property access
+if (property !== undefined) {
+// Check if it's a function - if so, should it be called?
+// Smalltalk convention would usually require explicit 'value' message.
+// Let's return the property value directly for unary sends.
+return property;
+}
+} else if (args.length === 1 && selector.endsWith(':')) {
+// Keyword send with one arg: Treat as property assignment? (e.g., 'x:')
+const setterSelector = selector.slice(0, -1); // remove trailing ':'
+if (setterSelector in receiver) {
+try {
+(receiver as any)[setterSelector] = args[0];
+return args[0]; // Assignment returns the assigned value
+} catch (e: any) {
+console.error(Error during fallback JS property assignment for #${selector}:, e);
+throw new SonError(Failed to set JS property ${setterSelector}: ${e.message});
+}
+}
+} else if (typeof property === 'function') {
+// If property is a function and arguments are provided (binary/keyword)
+// Maybe call it? This overlaps with JSBridge logic. Let's restrict this fallback.
+console.warn(JS property '${selector}' is a function, but calling via fallback is discouraged. Use JSBridge.);
+// Optionally call it, but it's risky:
+// try {
+// return property.apply(receiver, args);
+// } catch (e: any) {
+// console.error(Error during fallback JS function execution for #${selector}:, e);
+// throw e;
+// }
+}
+// If none of the above matched, the message is not understood via fallback property access/assignment.
+throw new MessageNotUnderstoodError(receiver, selector);
+}
+/**
+Executes primitive operations identified by selectors like "primitive:NumberAdd:".
+@param primitiveSelector The full primitive selector string.
+@param evaluatedReceiver The evaluated receiver (self).
+@param evaluatedArgs An array containing the already evaluated arguments (excluding self) for the primitive.
+@param env The current environment (potentially useful for future primitives).
+@returns The result of the primitive operation.
+@throws {ArgumentError} If the wrong number or type of arguments are provided.
+@throws {SonError} If the primitive selector is unknown or an error occurs (e.g., division by zero).
+*/
+function handlePrimitive(primitiveSelector: string, evaluatedReceiver: SonValue, evaluatedArgs: SonValue[], env: ISonEnvironment): SonValue {
+console.debug(Handling primitive: ${primitiveSelector} on receiver:, evaluatedReceiver, with args:, evaluatedArgs);
+const self = evaluatedReceiver;
+const arg1 = evaluatedArgs.length > 0 ? evaluatedArgs[0] : undefined;
+const arg2 = evaluatedArgs.length > 1 ? evaluatedArgs[1] : undefined;
+// Helper for type checking
+const checkArgs = (types: (('number' | 'string' | 'boolean' | 'object' | 'any')[])) => {
+const actualArgs = [self, ...evaluatedArgs];
+if (types.length !== actualArgs.length) {
+throw new ArgumentError(Primitive ${primitiveSelector} expects ${types.length} arguments (including self), got ${actualArgs.length});
+}
+for(let i=0; i < types.length; i++) {
+if (types[i] !== 'any' && typeof actualArgs[i] !== types[i]) {
+// Allow specific checks, e.g., null is 'object'
+if (types[i] === 'object' && actualArgs[i] !== null) continue; // null is ok for object type
+throw new ArgumentError(Primitive ${primitiveSelector} argument ${i} must be type ${types[i]}, got ${typeof actualArgs[i]});
+}
+}
+};
+switch (primitiveSelector) {
+// --- Number Primitives ---
+case "primitive:NumberAdd:": checkArgs(['number', 'number']); return (self as number) + (arg1 as number);
+case "primitive:NumberSubtract:": checkArgs(['number', 'number']); return (self as number) - (arg1 as number);
+case "primitive:NumberMultiply:": checkArgs(['number', 'number']); return (self as number) * (arg1 as number);
+case "primitive:NumberDivide:":
+checkArgs(['number', 'number']);
+if (arg1 === 0) throw new SonError("Division by zero");
+return (self as number) / (arg1 as number);
+case "primitive:NumberLessThan:": checkArgs(['number', 'number']); return (self as number) < (arg1 as number);
+case "primitive:NumberGreaterThan:": checkArgs(['number', 'number']); return (self as number) > (arg1 as number);
+case "primitive:NumberLessOrEqual:": checkArgs(['number', 'number']); return (self as number) <= (arg1 as number);
+case "primitive:NumberGreaterOrEqual:": checkArgs(['number', 'number']); return (self as number) >= (arg1 as number);
+case "primitive:NumberEquals:":
+// For primitive equality, check type AND value. SON '=' might allow coercion later.
+if (typeof self !== 'number' || typeof arg1 !== 'number') return false;
+return self === arg1;
+// --- Object Primitives ---
+ case "primitive:Equals:": // Basic JS equality (===)
+      checkArgs(['any', 'any']);
+      return self === arg1;
+ case "primitive:NotEquals:": // Basic JS inequality (!==)
+      checkArgs(['any', 'any']);
+      return self !== arg1;
+ case "primitive:IdentityEquals:": // JS identity (===)
+      checkArgs(['any', 'any']);
+      return self === arg1;
+ case "primitive:IdentityNotEquals:": // JS identity (!==)
+      checkArgs(['any', 'any']);
+      return self !== arg1;
+ case "primitive:Class:": // Get the class object itself
+      checkArgs(['any']);
+      return getClassOf(self, env); // Return the class object found by getClassOf
+
+
+ // --- Boolean Primitives ---
+  case "primitive:BooleanAnd:": checkArgs(['boolean', 'boolean']); return (self as boolean) && (arg1 as boolean);
+  case "primitive:BooleanOr:": checkArgs(['boolean', 'boolean']); return (self as boolean) || (arg1 as boolean);
+  case "primitive:BooleanNot": checkArgs(['boolean']); return !(self as boolean);
+  // Add ifTrue: ifFalse: ifTrue:ifFalse: ? These often take blocks.
+  // Example: primitive:BooleanIfTrue: requires block arg
+  case "primitive:BooleanIfTrue:":
+       checkArgs(['boolean', 'object']); // Expect block closure as arg1
+       if (self === true) {
+           if (!isSonBlock(arg1)) throw new ArgumentError("ifTrue: requires a BlockClosure argument");
+           // Evaluate the block (value:)
+           return sendMessage(arg1, 'value', [], env);
+       }
+       return null; // Return null if condition is false (Smalltalk convention)
+  case "primitive:BooleanIfFalse:":
+       checkArgs(['boolean', 'object']); // Expect block closure as arg1
+       if (self === false) {
+           if (!isSonBlock(arg1)) throw new ArgumentError("ifFalse: requires a BlockClosure argument");
+           // Evaluate the block (value:)
+           return sendMessage(arg1, 'value', [], env);
+       }
+       return null; // Return null if condition is true
+ case "primitive:BooleanIfTrueIfFalse:":
+      checkArgs(['boolean', 'object', 'object']); // Expect two blocks
+      const blockToRun = self === true ? arg1 : arg2;
+      if (!isSonBlock(blockToRun)) throw new ArgumentError("ifTrue:ifFalse: requires BlockClosure arguments");
+      return sendMessage(blockToRun, 'value', [], env);
+
+
+ // --- Add other primitives here (String, Array, Symbol etc.) ---
+
+ default:
+     throw new SonError(`Unknown primitive selector: ${primitiveSelector}`);
+     }
+}
+/**
+Central function for sending a message (selector + arguments) to a receiver.
+Dispatches to appropriate handlers: JSBridge, Primitives, SON Methods, Blocks, or JS Property Fallback.
+@param receiver The evaluated receiver value.
+@param selector The message selector string.
+@param args The evaluated arguments array.
+@param env The current execution environment (used for creating method scopes).
+@returns The result of the message send.
+@throws {MessageNotUnderstoodError} If the receiver doesn't understand the message via any mechanism.
+@throws {ArgumentError} If the message is sent with incorrect arguments (arity/type mismatch).
+@throws {LocalReturnError | NonLocalReturnError} If the message execution triggers a return.
+*/
+function sendMessage(receiver: SonValue, selector: string, args: SonValue[], env: ISonEnvironment): SonValue {
+console.debug(sendMessage: receiver=${JSON.stringify(receiver)?.substring(0,50)}, selector=#${selector}, args=${JSON.stringify(args)?.substring(0,100)});
+// 1. Handle JSBridge Calls
+if (isJsBridge(receiver)) {
+const bridgeFunction = receiver[selector];
+if (typeof bridgeFunction === 'function') {
+console.debug(Calling JSBridge function #${selector});
+try {
+// Call the JS function attached to the bridge object
+// 'this' context will be the bridge object itself.
+return bridgeFunction.apply(receiver, args);
+} catch (e: any) {
+console.error(Error during JSBridge call #${selector}:, e);
+// Wrap JS errors in SonError? Or let them propagate?
+throw new SonError(JSBridge Error in #${selector}: ${e.message});
+}
+} else {
+throw new MessageNotUnderstoodError(receiver, selector);
+}
+}
+// 2. Handle Primitive Calls (if method lookup finds a primitive marker)
+// The base environment seed should define methods like Number>>+ as { "primitive": "primitive:NumberAdd:" }
+// This lookup happens before normal method execution.
+// 3. Attempt SON Method Lookup
+const classObject = getClassOf(receiver, env);
+let methodImpl: SonMethodImplementation | null = null;
+let isPrimitive = false;
+let primitiveSelector = "";
+if (classObject) {
+// Look up method definition on the class object
+let rawMethodData: any = null;
+if (typeof (classObject as any).lookupMethodLocally === 'function') {
+// If classObject is a SonEnvironment, use its lookup
+rawMethodData = (classObject as ISonEnvironment).lookupMethodLocally(selector);
+} else if (isPlainObject(classObject) && (classObject as any).methods) {
+// If classObject is a plain object from base env, look in its 'methods' map
+const methodsMap = (classObject as any).methods as Record<string, any>;
+rawMethodData = methodsMap[selector];
+}
+// Process the found method data
+  if (rawMethodData) {
+      // Check if it's a primitive marker first
+      if (typeof rawMethodData === 'object' && rawMethodData !== null && typeof rawMethodData.primitive === 'string') {
+          isPrimitive = true;
+          primitiveSelector = rawMethodData.primitive;
+          console.debug(`Method #${selector} maps to primitive: ${primitiveSelector}`);
+      }
+      // Check if it's a standard method implementation structure
+      else if (typeof rawMethodData === 'object' && rawMethodData !== null && Array.isArray(rawMethodData.argNames) && rawMethodData.body !== undefined) {
+           methodImpl = { // Reconstruct into expected interface
+               __type: 'SonMethodImplementation',
+               argNames: rawMethodData.argNames.map(String),
+               body: rawMethodData.body,
+               selector: selector
+           };
+      } else {
+           console.warn(`Invalid method structure found for ${selector} in class:`, classObject, " Data:", rawMethodData);
+      }
+  }
+  }
+// 4. Execute Primitive if found
+if (isPrimitive) {
+return handlePrimitive(primitiveSelector, receiver, args, env);
+}
+// 5. Execute Found SON Method
+if (methodImpl) {
+console.debug(Executing SON method #${selector} on, receiver, " Implementation:", methodImpl);
+const methodEnv = env.createChild({ isMethodContext: true, methodSelf: receiver });
+if (methodImpl.argNames.length !== args.length) {
+     throw new ArgumentError(`Method #${selector} expects ${methodImpl.argNames.length} arguments, but received ${args.length}.`);
+ }
+ for (let i = 0; i < methodImpl.argNames.length; i++) {
+     methodEnv.set(methodImpl.argNames[i], args[i]);
+ }
+ console.debug("Method Env:", methodEnv.dumpScope ? methodEnv.dumpScope(0) : methodEnv);
+
+ try {
+      let methodResult: SonValue;
+      if (!Array.isArray(methodImpl.body)) {
+          methodResult = evaluate(methodImpl.body, methodEnv);
+      } else {
+          methodResult = null; // Default if body is empty array
+          for (let i = 0; i < methodImpl.body.length; i++) {
+             methodResult = evaluate(methodImpl.body[i], methodEnv);
+          }
+      }
+     // Implicit return of self if no explicit '^' was caught
+     console.debug(`Method #${selector} implicitly returning self.`);
+     return receiver;
+
+ } catch (e) {
+     if (e instanceof LocalReturnError || e instanceof NonLocalReturnError) {
+         console.debug(`Method #${selector} caught return:`, e.value);
+         return e.value;
+     } else {
+         throw e; // Propagate other errors
+     }
+ }
+ }
+// 6. Handle Block Execution (value:, value:value:, etc.)
+if (isSonBlock(receiver)) {
+if (selector.startsWith('value') && (selector === 'value' || selector.match(/^value:
+/
+)
+∣
+∣
+s
+e
+l
+e
+c
+t
+o
+r
+.
+m
+a
+t
+c
+h
+(
+/
+v
+a
+l
+u
+e
+:
+(
+v
+a
+l
+u
+e
+:
+)
++
+/)∣∣selector.match(/ 
+v
+ alue:(value:)+
+/))) {
+const expectedArgs = selector === 'value' ? 0 : selector.split(':').length - 1;
+if (args.length !== expectedArgs) {
+throw new ArgumentError(Block ${selector} expects ${expectedArgs} arguments, but received ${args.length}.);
+}
+if (receiver.argNames.length !== args.length) {
+throw new ArgumentError(Block definition expected ${receiver.argNames.length} arguments, but received ${args.length} for ${selector}.);
+}
+const blockEnv = receiver.lexicalScope.createChild(); // Not a method context
+     for (let i = 0; i < receiver.argNames.length; i++) {
+         blockEnv.set(receiver.argNames[i], args[i]);
+     }
+
+     console.debug("Executing block body:", JSON.stringify(receiver.body), "in env:", blockEnv.dumpScope? blockEnv.dumpScope(0) : blockEnv);
+     try {
+          let blockResult: SonValue = null;
+          if(Array.isArray(receiver.body)) {
+             for (let i = 0; i < receiver.body.length; i++) {
+                 blockResult = evaluate(receiver.body[i], blockEnv);
+             }
+          } else {
+              throw new Error("Invalid block body structure: expected an array.");
+          }
+         return blockResult; // Implicit return of last statement
+
+     } catch (e) {
+          if (e instanceof NonLocalReturnError) {
+             // Non-local return needs to propagate if it targets the block's home context.
+              if (e.homeContext === receiver.homeContext && receiver.homeContext !== null) {
+                  console.debug("Propagating non-local return from block:", e.value);
+                  throw e;
+              } else if (receiver.homeContext === null) {
+                   // Block defined outside method context cannot non-local return.
+                   throw new SonError("Cannot perform non-local return (^) from block defined outside a method context.");
+              } else {
+                  // Context mismatch - internal error or unexpected state
+                  console.error("Non-local return error encountered with mismatched home context!", e);
+                  throw new Error("Internal error: Non-local return target mismatch.");
+              }
+         } else if (e instanceof LocalReturnError) {
+             // Explicit local return (^) from block not allowed.
+             throw new SonError("Cannot perform local return (^) from within a block context. Use non-local return targeting the defining method.");
+         } else {
+             throw e; // Re-throw other errors
+         }
+     }
+ } else {
+      // If it's a block but selector isn't value*, try looking up on BlockClosure class
+      console.debug(`Block received #${selector}, looking up on BlockClosure class...`);
+      const blockClass = getClassOf(receiver, env);
+      if (blockClass) {
+           // Re-enter sendMessage, but this time lookup will happen on BlockClosure
+           // This prevents infinite loops because getClassOf(block) returns BlockClosure env, not the block itself.
+           // We need 'receiver' to be the block itself for the method execution context.
+           // Let's try sending the message to the class environment but passing the block as 'self'
+           // This seems overly complex. Let's just throw MNU for now if not value*.
+           // A BlockClosure class could implement methods like 'whileTrue:'.
+            throw new MessageNotUnderstoodError(receiver, selector);
+      } else {
+            throw new MessageNotUnderstoodError(receiver, selector);
+      }
+ }
+ }
+// 7. Fallback to JavaScript Property Access (DEPRECATED - Last Resort)
+console.warn(No SON method/block execution for #${selector}, attempting deprecated JS property fallback...);
+try {
+return lookupAndSendJSProperty(receiver, selector, args);
+} catch (e) {
+if (e instanceof MessageNotUnderstoodError) {
+// If all mechanisms failed, throw the final MNU.
+console.error(Message #${selector} not understood by receiver (SON/Block/JS/Primitive):, receiver);
+// Make the error message more informative
+let receiverType = typeof receiver;
+if (receiver === null) receiverType = 'null';
+else if (isSonSymbol(receiver)) receiverType = 'Symbol';
+else if (isSonBlock(receiver)) receiverType = 'BlockClosure';
+else if (receiver instanceof SonEnvironment) receiverType = 'SonEnvironment';
+throw new MessageNotUnderstoodError(receiver, selector); // Use original error for now
+ } else {
+     // Propagate other errors from the fallback attempt
+     throw e;
+ }
+ }
+}
+// --- Core Evaluation Function ---
+/**
+Evaluates a SON node within a given environment.
+@param node The SON node (JSON value) to evaluate.
+@param env The current execution environment (provides scope).
+@returns The result of evaluating the node.
+@throws {SonError} Or subclasses for runtime errors.
+@throws {LocalReturnError | NonLocalReturnError} For control flow.
+@throws {Error} For syntax errors or unexpected issues.
+*/
+export function evaluate(node: SonValue, env: ISonEnvironment): SonValue {
+// 1. Handle Literals and Variables
+if (typeof node === 'number' || typeof node === 'boolean' || node === null) {
+return node;
+}
+if (typeof node === 'string') {
+if (node.startsWith('
+'");
+if (varName === 'env') return env; // Allow introspection
+try {
+return env.get(varName);
+} catch (e) {
+if (e instanceof VariableNotFoundError) {
+console.error(Variable lookup failed: ${e.message});
+console.error("Current environment scope:", env.dumpScope? env.dumpScope(2): env); // Log env state on error
+}
+throw e; // Re-throw
+}
+}
+return node; // String literal
+}
+if (isSonSymbol(node)) {
+return node; // Return symbol object
+}
+if (isSonBlock(node)) {
+// If a block itself is evaluated (e.g. just [[]=>:[]]), return it.
+return node;
+}
+if (isJsBridge(node)) {
+// If the bridge object itself is evaluated, return it
+return node;
+}
+// 2. Handle Arrays (Special Forms, Sequences, Message Sends)
+if (Array.isArray(node)) {
+const sonArray = node as SonArray;
+if (sonArray.length === 0) {
+return null; // Empty sequence evaluates to null
+}
+const first = sonArray[0];
+
+ // --- Special Forms ---
+
+ // Return Statement: ["^", expr]
+ if (first === '^') {
+     if (sonArray.length !== 2) {
+         throw new ArgumentError("Return statement ('^') requires exactly one argument.");
+     }
+     const value = evaluate(sonArray[1], env);
+     const homeCtx = findHomeContext(env); // Find defining method context
+
+     if (!homeCtx && !env.isMethodContext()) {
+          // Cannot return if not inside a method context (directly or via block)
+          throw new SonError("Cannot return ('^') from outside a method context.");
+     }
+
+     if (env.isMethodContext()) {
+          // Inside the primary method context, perform a local return
+          console.debug("Local return:", value);
+          throw new LocalReturnError(value);
+     } else {
+          // Inside a block, perform a non-local return targeting the home method context
+          if (!homeCtx) {
+              // If homeCtx is null here, the block was defined outside a method.
+              throw new SonError("Cannot perform non-local return (^) from block defined outside a method context.");
+          }
+          console.debug("Non-local return:", value, "to context:", homeCtx);
+          throw new NonLocalReturnError(value, homeCtx);
+     }
+ }
+
+ // Method Definition: ["define:args:body:", selector, ["argNames"], [body...]]
+ // This form should typically be evaluated via a message send to the class/object,
+ // but we allow direct evaluation in the environment for flexibility (e.g., in Workspace).
+ if (first === 'define:args:body:') {
+      if (sonArray.length !== 4) throw new ArgumentError("Method definition requires selector, args array, and body array.");
+      const selector = sonArray[1];
+      const argsNode = sonArray[2];
+      const bodyNode = sonArray[3];
+      if (typeof selector !== 'string') throw new ArgumentError("Method selector must be a string.");
+      if (!Array.isArray(argsNode)) throw new ArgumentError("Method arguments must be an array of strings.");
+
+      const argNames = argsNode.map(arg => {
+          if (typeof arg !== 'string') throw new ArgumentError("Method argument names must be strings.");
+          return arg;
+      });
+
+      // Define method on the current environment
+      // Check if env supports defineMethod (should exist on SonEnvironment)
+      if (typeof (env as any).defineMethod === 'function') {
+          (env as any).defineMethod(selector, argNames, bodyNode);
+      } else {
+           throw new SonError("Cannot define method: Current environment does not support 'defineMethod'.");
+      }
+      return { '#': selector }; // Return selector symbol
+ }
+
+
+ // Assignment: ["var:", expr]
+ // This is a special form evaluated directly, not a message send.
+ if (sonArray.length === 2 && typeof first === 'string' && first.endsWith(':') && first.length > 1 && !first.includes(':') /* Simple assignment only */ ) {
+     const varName = first.slice(0, -1);
+     // Ensure it's not a reserved word or special form handled elsewhere
+      if (varName === '^' || varName === 'define' || varName === 'cascade') {
+          // Fall through to message send / sequence logic
+      } else {
+         const value = evaluate(sonArray[1], env);
+         env.set(varName, value);
+         return value; // Assignment returns the assigned value
+      }
+ }
+
+ // --- Remaining Array Forms (Block, Cascade, Message Send, Sequence) ---
+ // Block closure, cascade, message sends, and sequences are handled by evaluating
+ // the first element and then determining the structure.
+
+ const evaluatedFirst = evaluate(first, env);
+ const remainingNodes = sonArray.slice(1);
+
+ // --- Cascade Check ---
+ if (remainingNodes.length === 2 && remainingNodes[0] === 'cascade:' && Array.isArray(remainingNodes[1])) {
+     const receiver = evaluatedFirst;
+     const messages = remainingNodes[1] as SonArray[];
+     if (messages.length === 0) return receiver;
+
+     for (const msg of messages) {
+          if (!Array.isArray(msg) || msg.length < 1) {
+              throw new ArgumentError("Invalid message format within cascade.");
+          }
+          const msgSelector = msg[0];
+          const msgArgNodes = msg.slice(1);
+          if (typeof msgSelector !== 'string') {
+              throw new ArgumentError(`Invalid selector in cascade message: ${JSON.stringify(msgSelector)}`);
+          }
+          const msgArgs = msgArgNodes.map(argNode => evaluate(argNode, env));
+          // Send message, discard result
+          sendMessage(receiver, msgSelector, msgArgs, env);
+     }
+     return receiver; // Cascade returns the original receiver
+ }
+
+  // --- Block Definition Check ---
+  // This is only needed if block isn't the *first* element, e.g. `[someExpr, [[] =>: []]]`
+  // which isn't standard SON, but handle defensively.
+  if (remainingNodes.length === 2 && Array.isArray(evaluatedFirst) && remainingNodes[0] === '=>:' && Array.isArray(remainingNodes[1])) {
+      // Structure: [argNodes, "=>:", body]
+      const argNodes = evaluatedFirst as SonArray;
+      const body = remainingNodes[1] as SonArray;
+      const argNames = argNodes.map(argNode => {
+          if (typeof argNode !== 'string') throw new ArgumentError("Block argument names must be strings.");
+          return argNode;
+      });
+      const homeCtx = findHomeContext(env);
+      const block: SonBlock = {
+          __type: 'SonBlock', argNames, body, lexicalScope: env, homeContext: homeCtx!
+      };
+      console.debug("Created block closure (nested eval):", block);
+      return block;
+  }
+
+
+ // --- Message Send Check ---
+ if (remainingNodes.length > 0 && typeof remainingNodes[0] === 'string') {
+     const selector = remainingNodes[0];
+     const argNodes = remainingNodes.slice(1);
+
+     // Keyword Send: selector contains ':'
+     if (selector.includes(':')) {
+         // Ensure not cascade/block/primitive handled above
+         if (selector !== 'cascade:' && selector !== '=>:' && !selector.startsWith('primitive:')) {
+              const args = argNodes.map(argNode => evaluate(argNode, env));
+              // Arity check based on colons
+              const expectedArgs = selector.split(':').filter(p => p.length > 0).length;
+              if (expectedArgs !== args.length) {
+                   throw new ArgumentError(`Keyword selector #${selector} expects ${expectedArgs} arguments, got ${args.length}.`);
+              }
+              return sendMessage(evaluatedFirst, selector, args, env);
+         }
+         // else fall through to sequence if it was cascade/=>:/primitive misidentified here
+     }
+     // Binary Send: selector has no ':', and there's exactly one argument node
+     else if (argNodes.length === 1) {
+         const args = [evaluate(argNodes[0], env)]; // Evaluate the single argument
+         return sendMessage(evaluatedFirst, selector, args, env);
+     }
+     // Unary Send: selector has no ':', and there are no argument nodes
+     else if (argNodes.length === 0) {
+         return sendMessage(evaluatedFirst, selector, [], env);
+     }
+     // else fall through to sequence
+ }
+
+
+ // --- Default to Sequence ---
+ console.debug(`Evaluating as Sequence: ${JSON.stringify(sonArray)}`);
+ let lastResult: SonValue = evaluatedFirst; // Result starts with the already evaluated first element
+ for (let i = 1; i < sonArray.length; i++) {
+     lastResult = evaluate(sonArray[i], env);
+     // Note: Returns errors are caught by the caller (method or block exec frame)
+ }
+ return lastResult; // Return the result of the last statement
+ }
+// 3. Handle Objects (if not Symbols, Blocks, Bridge already handled)
+if (typeof node === 'object' && node !== null) {
+// Plain JSON object - return as is. Messages handled by class lookup/JS fallback.
+return node as SonObject;
+}
+// Should not be reachable
+console.error("Evaluation failed for node:", JSON.stringify(node));
+throw new Error(Unknown or unhandled SON node type/structure: ${Object.prototype.toString.call(node)});
+}
+      ]]>
+</file_code>
+    </file>
+    <file>
+      <file_operation>UPDATE</file_operation>
+      <file_path>server/db.ts</file_path>
+      <file_code><![CDATA[
+/**
+ * <ai_info>
+ * This file handles SQLite database initialization, schema creation, and seeding
+ * for the SON Environment backend. It uses `bun:sqlite` for database operations.
+ * It now includes a `seedDatabase` function to populate the `son_base_environment`
+ * table with core definitions for Object, Number, String, Boolean, BlockClosure, Symbol,
+ * Transcript, and the JSBridge. The `initializeDatabase` function ensures tables
+ * are created and seeding occurs only if the base environment table is initially empty.
+ * </ai_info>
+ *
+ * @file server/db.ts
+ * @description SQLite database initialization, schema setup, and seeding.
+ *
+ * Key features:
+ * - Initializes a connection to the SQLite database (`son_environment.sqlite`).
+ * - Defines and creates the necessary tables (`son_classes`, `son_methods`, `son_base_environment`).
+ * - Includes a `seedDatabase` function to populate `son_base_environment` with essential definitions.
+ * - Ensures seeding only happens once on an empty database.
+ * - Exports the initialized database instance.
+ *
+ * @dependencies
+ * - bun:sqlite: Built-in Bun module for SQLite interaction.
+ * - node:crypto: For generating UUIDs (though Bun's `crypto.randomUUID()` is preferred).
+ * - node:fs: For checking if DB file exists (optional).
+ *
+ * @notes
+ * - Database file is stored in `server/data/son_environment.sqlite`.
+ * - Error handling for database operations should be added in query functions.
+ * - Seeding data provides the fundamental building blocks for the SON runtime.
+ */
+import { Database } from "bun:sqlite";
+import { join } from 'node:path';
+import { mkdirSync, existsSync } from 'node:fs';
+
+// Define the path to the data directory and the database file
+const dataDir = join(import.meta.dir, 'data');
+const dbPath = join(dataDir, "son_environment.sqlite");
+
+// Ensure the data directory exists
+try {
+    if (!existsSync(dataDir)) {
+        mkdirSync(dataDir, { recursive: true });
+        console.log(`Created data directory: ${dataDir}`);
+    }
+} catch (err) {
+    console.error("Failed to create data directory:", err);
+    // Decide if process should exit or continue without db
+    process.exit(1); // Exit if we can't ensure data directory
+}
+
+
+console.log(`Database path: ${dbPath}`);
+
+// Initialize the database connection
+let db: Database;
+try {
+     db = new Database(dbPath, { create: true }); // Creates the file if it doesn't exist
+     console.log("Database connection opened successfully.");
+} catch (err) {
+     console.error("Failed to open database connection:", err);
+     process.exit(1); // Exit if DB cannot be opened
+}
+
+
+/**
+ * Creates the necessary database tables if they don't already exist.
+ */
+const createTables = () => {
+    console.log("Creating database tables if they don't exist...");
+    try {
+        db.run(`
+            CREATE TABLE IF NOT EXISTS son_classes (
+                id TEXT PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_son_classes_name ON son_classes(name);`);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS son_methods (
+                id TEXT PRIMARY KEY,
+                class_id TEXT NOT NULL REFERENCES son_classes(id) ON DELETE CASCADE,
+                selector TEXT NOT NULL,
+                arguments_json TEXT NOT NULL,
+                body_json TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(class_id, selector)
+            );
+        `);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_son_methods_class_id ON son_methods(class_id);`);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS son_base_environment (
+                key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL
+            );
+        `);
+        console.log("Table creation check complete.");
+    } catch (err) {
+        console.error("Failed to create database tables:", err);
+        throw err; // Re-throw to stop initialization if tables fail
+    }
+};
+
+/**
+ * Seeds the `son_base_environment` table with essential definitions.
+ * This should only run if the table is empty.
+ */
+const seedDatabase = () => {
+    console.log("Checking if database seeding is required...");
+    try {
+        // Check if the base environment table is empty
+        const countResult = db.query<{ count: number }, []>(`SELECT COUNT(*) as count FROM son_base_environment`).get();
+
+        if (countResult && countResult.count > 0) {
+            console.log("Database already seeded. Skipping.");
+            return;
+        }
+
+        console.log("Seeding son_base_environment table...");
+
+        // Define the base environment seed data
+        // Uses 'primitive:' marker for methods implemented by the interpreter primitive handler.
+        const baseEnvSeedData: Record<string, any> = {
+            // --- Core Classes (Structure based on mergeBaseEnvironment expectations) ---
+            "Object": {
+                "methods": {
+                    "==":           { "argNames": ["other"], "body": ["primitive:Equals:", "$self", "$other"]},
+                    "~=":           { "argNames": ["other"], "body": ["primitive:NotEquals:", "$self", "$other"]},
+                    "===":          { "argNames": ["other"], "body": ["primitive:IdentityEquals:", "$self", "$other"]},
+                    "~~=":          { "argNames": ["other"], "body": ["primitive:IdentityNotEquals:", "$self", "$other"]},
+                    "class":        { "argNames": [],        "body": ["primitive:Class:", "$self"] },
+                    "printString":  { "argNames": [],        "body": `"an Object"` }, // Basic fallback
+                    // Add basic error handling, subclass responsibility etc. later
+                }
+            },
+            "Number": {
+                 // Inheritance not explicitly modeled here, but assumes Object methods are available via lookup fallback
+                "methods": {
+                    "+":  { "argNames": ["aNumber"], "body": ["primitive:NumberAdd:", "$self", "$aNumber"] },
+                    "-":  { "argNames": ["aNumber"], "body": ["primitive:NumberSubtract:", "$self", "$aNumber"] },
+                    "*":  { "argNames": ["aNumber"], "body": ["primitive:NumberMultiply:", "$self", "$aNumber"] },
+                    "/":  { "argNames": ["aNumber"], "body": ["primitive:NumberDivide:", "$self", "$aNumber"] },
+                    "<":  { "argNames": ["aNumber"], "body": ["primitive:NumberLessThan:", "$self", "$aNumber"] },
+                    ">":  { "argNames": ["aNumber"], "body": ["primitive:NumberGreaterThan:", "$self", "$aNumber"] },
+                    "<=": { "argNames": ["aNumber"], "body": ["primitive:NumberLessOrEqual:", "$self", "$aNumber"] },
+                    ">=": { "argNames": ["aNumber"], "body": ["primitive:NumberGreaterOrEqual:", "$self", "$aNumber"] },
+                    "==": { "argNames": ["aNumber"], "body": ["primitive:NumberEquals:", "$self", "$aNumber"] }, // Specific number equality
+                    "printString": { "argNames": [], "body": ["primitive:NumberToString:", "$self"] } // Needs primitive
+                }
+            },
+            "String": {
+                 "methods": {
+                    ",": { "argNames": ["aString"], "body": ["primitive:StringConcatenate:", "$self", "$aString"] }, // Needs primitive
+                    "printString": { "argNames": [], "body": "$self" } // Strings print as themselves
+                     // Add length, comparison, etc. later
+                 }
+            },
+            "Boolean": {
+                 "methods": {
+                    "&":        { "argNames": ["aBoolean"], "body": ["primitive:BooleanAnd:", "$self", "$aBoolean"] },
+                    "|":        { "argNames": ["aBoolean"], "body": ["primitive:BooleanOr:", "$self", "$aBoolean"] },
+                    "not":      { "argNames": [],           "body": ["primitive:BooleanNot", "$self"] },
+                    "ifTrue:":  { "argNames": ["trueBlock"], "body": ["primitive:BooleanIfTrue:", "$self", "$trueBlock"] },
+                    "ifFalse:": { "argNames": ["falseBlock"],"body": ["primitive:BooleanIfFalse:", "$self", "$falseBlock"] },
+                    "ifTrue:ifFalse:": { "argNames": ["trueBlock", "falseBlock"], "body": ["primitive:BooleanIfTrueIfFalse:", "$self", "$trueBlock", "$falseBlock"] },
+                     "printString": { "argNames": [], "body": ["primitive:BooleanToString:", "$self"] } // Needs primitive
+                 }
+            },
+             "BlockClosure": {
+                 "methods": {
+                     // value, value:, value:value: etc. are handled directly by sendMessage based on type check
+                     // We could define methods like whileTrue:, whileFalse: here
+                     "whileTrue:": {
+                         "argNames": ["bodyBlock"],
+                         "body": [
+                             // Loop structure:
+                             // L1: [conditionBlock value] ifFalse: [^ self]. "Evaluate condition, exit loop if false"
+                             //     [bodyBlock value].                  "Execute body"
+                             //     -> L1                               "Loop back (implicit)" - This needs loop construct or recursion.
+
+                             // Recursive approach (potential stack overflow for long loops):
+                             // Define recursive helper? Or implement loop primitive?
+                             // For now, leave unimplemented or use JSBridge setTimeout for pseudo-loop.
+                              ["$Transcript", "show:", "'whileTrue:' not fully implemented in base env."],
+                              {"#": "NotImplemented"} // Placeholder return
+                         ]
+                     },
+                     "printString": { "argNames": [], "body": `"a BlockClosure"` }
+                 }
+             },
+            "Symbol": {
+                 "methods": {
+                     "printString": { "argNames": [], "body": ["primitive:SymbolToString:", "$self"] } // Needs primitive
+                 }
+             },
+            "UndefinedObject": { // Class for 'null'
+                "methods": {
+                    "ifNil:": { "argNames": ["nilBlock"], "body": ["$nilBlock", "value"] }, // Execute block if receiver is nil
+                    "ifNotNil:": { "argNames": ["notNilBlock"], "body": "null" }, // Do nothing if receiver is nil
+                    "ifNil:ifNotNil:": { "argNames": ["nilBlock", "notNilBlock"], "body": ["$nilBlock", "value"] },
+                     "printString": { "argNames": [], "body": `"nil"` }
+                 }
+            },
+
+            // --- Core Objects (non-class structures) ---
+            "Transcript": {
+                // The actual implementation is injected dynamically by Workspace to interact with React state.
+                // This definition just signals its existence and expected methods.
+                "methods": {
+                    "show:": { "argNames": ["anObject"], "body": [] }, // Body is ignored by dynamic injection
+                    "cr":    { "argNames": [],           "body": [] }
+                }
+            },
+            "JSBridge": {
+                // Special marker for the context provider to identify and instantiate
+                "__isJSBridge": true,
+                // Methods are placeholders; actual implementation is JS functions attached in context provider.
+                "methods": {
+                    "log:": { "argNames": ["anObject"], "body": null },
+                    "setTimeout:delay:": { "argNames": ["aBlock", "delayMs"], "body": null },
+                    "fetch:options:": { "argNames": ["url", "options"], "body": null }
+                }
+            }
+        };
+
+        // Prepare statement for insertion
+        const insertStmt = db.prepare(`INSERT INTO son_base_environment (key, value_json) VALUES (?, ?)`);
+
+        // Insert data within a transaction
+        const insertMany = db.transaction((data) => {
+            for (const key in data) {
+                try {
+                    const valueJson = JSON.stringify(data[key]);
+                    insertStmt.run(key, valueJson);
+                    console.log(` -> Seeded base environment key: ${key}`);
+                } catch (err) {
+                     console.error(`Failed to stringify or insert base env key '${key}':`, err);
+                     // Decide whether to continue or abort transaction
+                     throw new Error(`Seeding failed for key ${key}`);
+                }
+            }
+        });
+
+        insertMany(baseEnvSeedData);
+        console.log("Database seeding complete.");
+
+    } catch (err) {
+        console.error("Failed during database seeding check or process:", err);
+        throw err; // Propagate error
+    }
+};
+
+/**
+ * Initializes the database by creating tables and seeding if necessary.
+ */
+const initializeDatabase = () => {
+    console.log("Initializing database...");
+    try {
+        db.exec("PRAGMA journal_mode = WAL;"); // Improve concurrency
+        db.exec("PRAGMA foreign_keys = ON;"); // Ensure foreign key constraints are enforced
+        createTables();
+        seedDatabase();
+        console.log("Database initialization complete.");
+    } catch (err) {
+        console.error("Database initialization failed:", err);
+        // Close the DB connection if initialization fails?
+        db.close();
+        process.exit(1); // Exit if critical DB setup fails
+    }
+};
+
+// Initialize the database on module load
+initializeDatabase();
+
+
+export { db };
+      ]]>
+</file_code>
+</file>
+<file>
+  <file_operation>DELETE</file_operation>
+  <file_path>server/data/seed.sql</file_path>
+  <file_code><![CDATA[]]></file_code>
+</file>
+</changed_files>
+</code_changes>

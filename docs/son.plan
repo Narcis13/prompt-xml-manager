@@ -184,7 +184,7 @@ Okay, let's break down the development of the SON Environment application into a
     *   **Step Dependencies**: Step 8.
     *   **User Instructions**: Add relevant unit tests.
 
--   [ ] **Step 17: Enhance SON Interpreter - Blocks and Returns (Non-Local)**
+-   [x] **Step 17: Enhance SON Interpreter - Blocks and Returns (Non-Local)**
     *   **Task**: Implement support for block closures (`[["args"], "=>:", [body...]]`) including capturing the lexical environment. Implement return statements (`["^", expr]`), handling both local returns from methods and non-local returns from blocks using the Error-based mechanism described in the spec. This is complex.
     *   **Files**:
         *   `son-environment/client/src/lib/son/interpreter.ts`:
@@ -197,7 +197,7 @@ Okay, let's break down the development of the SON Environment application into a
     *   **Step Dependencies**: Step 8, Step 16.
     *   **User Instructions**: Add comprehensive unit tests for block creation, execution, scoping, and various return scenarios.
 
--   [ ] **Step 18: Implement Workspace - Console Output (`Transcript`)**
+-   [x] **Step 18: Implement Workspace - Console Output (`Transcript`)**
     *   **Task**: Implement the SON `Transcript` functionality. Define a `Transcript` object with a `show:` method in the base environment or inject it during execution. Calls to `Transcript show:` should append messages to a state managed by `Workspace`, displayed in the console output area.
     *   **Files**:
         *   `son-environment/client/src/components/ConsoleOutput.tsx`: Create a component to display an array of console messages (`"use client"`).
@@ -205,7 +205,7 @@ Okay, let's break down the development of the SON Environment application into a
         *   *(Optional - Backend)*: `son-environment/server/api/environmentHandlers.ts` / DB Seed: Define a base `Transcript` object in `son_base_environment` if preferring it to be part of the persisted base env (though dynamic injection might be simpler).
     *   **Step Dependencies**: Step 15.
 
--   [ ] **Step 19: Implement Workspace - Save Method Functionality**
+-   [x] **Step 19: Implement Workspace - Save Method Functionality**
     *   **Task**: Implement the "Save Method" button logic. Add UI elements (or parsing logic) to determine the target class name and selector. Parse the method definition (args, body) from the editor content. Call the `apiClient.saveMethod` function and provide user feedback (success/error message). Remind user refresh is needed.
     *   **Files**:
         *   `son-environment/client/src/components/Workspace.tsx`: Implement `handleSave` function.
